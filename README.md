@@ -113,3 +113,9 @@ recusados. Consulte [formatos, segurança e configuração](docs/STATEMENT_IMPOR
 Exige a migração `002_statement_imports`, chave privada `STATEMENT_ENCRYPTION_KEY`
 e Linux/WSL para processamento limitado. Produção exige também `DATABASE_SSL_CA`
 para conexão MySQL com TLS validado; configure criptografia de volumes/backups.
+
+## Pluggy (base mock)
+
+Sincronização backend simulada, categorização e insights por regras: consulte
+[configuração, endpoints e limites da integração](docs/PLUGGY.md).
+Requer migração `003_pluggy_receipts`; habilitação explícita apenas fora de produção.

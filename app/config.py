@@ -11,6 +11,9 @@ class Settings(BaseSettings):
     environment: Literal["development", "test", "production"] = "development"
     registration_enabled: bool | None = None
     ai_global_hourly_limit: int = Field(default=100, ge=1, le=10000)
+    pluggy_mock_enabled: bool = False
+    pluggy_client_id: str = ""
+    pluggy_client_secret: str = ""
     statement_encryption_key: str = ""
     database_ssl_ca: str = ""
     import_global_hourly_limit: int = Field(default=300, ge=1, le=10000)

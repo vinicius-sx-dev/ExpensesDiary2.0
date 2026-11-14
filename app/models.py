@@ -135,3 +135,10 @@ class ImportLease(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     token: Mapped[str] = mapped_column(String(32))
     expires_at: Mapped[int] = mapped_column(BigInteger)
+
+
+class PluggyReceipt(Base):
+    """Opaque transaction deduplication survives edits/deletion of ledger entries."""
+    __tablename__ = "pluggy_receipts"
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
+    request_id: Mapped[str] = mapped_column(String(36), primary_key=True)

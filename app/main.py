@@ -135,6 +135,9 @@ app.include_router(finance)
 app.include_router(reports)
 app.include_router(statement_imports)
 
+from app.pluggy import router as pluggy
+app.include_router(pluggy)
+
 
 # Outer validation rejects invalid hosts before database-backed request limits.
 app.add_middleware(TrustedHostMiddleware, allowed_hosts=settings.allowed_hosts)

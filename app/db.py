@@ -14,7 +14,9 @@ if settings.database_ssl_ca:
     context = ssl.create_default_context(cafile=settings.database_ssl_ca)
     context.minimum_version = ssl.TLSVersion.TLSv1_2
     connect_args["ssl"] = context
-engine = create_engine(settings.database_url, pool_pre_ping=True, pool_recycle=1800, connect_args=connect_args, hide_parameters=True)
+if settings.database_url.startswith("mysql+pymysql://"):
+    connect_args.update(connect_timeout=10, read_timeout=30, write_timeout=30)
+engine = create_engine(settings.database_url, pool_pre_ping=True, pool_recycle=1800, pool_size=5, max_overflow=5, pool_timeout=10, connect_args=connect_args, hide_parameters=True)
 SessionLocal = sessionmaker(bind=engine, expire_on_commit=False)
 
 
