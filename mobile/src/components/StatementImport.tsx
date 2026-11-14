@@ -7,10 +7,18 @@ import { money } from "../lib/types";
 import { useFinance } from "../stores/finance";
 import { Button, Card, colors, styles } from "./ui";
 
-type Row = { index: number; on_date: string; amount_cents: number; kind: "income" | "expense"; possible_duplicate: boolean };
+type Row = { index: number; on_date: string; amount_cents: number; kind: "income" | "expense"; possible_duplicate: boolean; context?: { merchant?: string } };
 type Preview = { id: string; expires_at: number; rows: Row[]; income_cents: number; expense_cents: number };
 
+const INSTITUTIONS = [
+  ["PICPAY", "PicPay"], ["NUBANK", "Nubank"], ["BANCO_DO_BRASIL", "Banco do Brasil"],
+  ["ITAU", "Itaú"], ["BRADESCO", "Bradesco"], ["SANTANDER", "Santander"],
+  ["CAIXA", "Caixa Econômica Federal"], ["BTG", "BTG Pactual"],
+  ["SICREDI", "Sicredi"], ["MERCADO_PAGO", "Mercado Pago"],
+] as const;
+
 export function StatementImport() {
+  const [institution, setInstitution] = useState("");
   const [preview, setPreview] = useState<Preview | null>(null);
   const [pending, setPending] = useState<{ id: string; expires_at: number }[]>([]);
   const [selected, setSelected] = useState<Set<number>>(new Set());
@@ -30,6 +38,7 @@ export function StatementImport() {
     finally { setBusy(false); }
   };
   const choose = () => run(async () => {
+    if (!institution) throw new Error("Selecione a instituição financeira.");
     const result = await DocumentPicker.getDocumentAsync({ type: "*/*", multiple: false, copyToCacheDirectory: true });
     if (result.canceled) return;
     const asset = result.assets[0];
@@ -42,9 +51,15 @@ export function StatementImport() {
       const size = asset.size ?? local?.size ?? asset.file?.size;
       if (size == null || size > 5 * 1024 * 1024 || size === 0)
         throw new Error("O arquivo precisa ter até 5 MiB. Divida o histórico por período.");
-      const body = Platform.OS === "web" ? asset.file : await local!.bytes();
-      if (!body) throw new Error("Não foi possível ler o arquivo selecionado.");
-      show(await api<Preview>(`/imports/preview?format=${format}`, "POST", body));
+      const body = new FormData();
+      body.append("institution", institution);
+      if (Platform.OS === "web") {
+        if (!asset.file) throw new Error("Não foi possível ler o arquivo selecionado.");
+        body.append("file", asset.file, asset.name);
+      } else {
+        body.append("file", { uri: asset.uri, name: asset.name, type: asset.mimeType || "application/octet-stream" } as unknown as Blob);
+      }
+      show(await api<Preview>("/imports/preview", "POST", body));
       await refresh();
     } finally {
       // Only delete the picker-created cache copy, never the user's original.
@@ -56,9 +71,21 @@ export function StatementImport() {
   const expense = selectedRows.filter(r => r.kind === "expense").reduce((n, r) => n + r.amount_cents, 0);
   return <Card>
     <Text style={styles.h2}>Importar extrato</Text>
-    <Text style={styles.body}>CSV, OFX, XML, PDF textual ou Word (.docx). Confira as movimentações antes de salvar. Apenas data, valor e entrada/saída serão registrados.</Text>
+    <Text style={styles.body}>CSV, OFX, XML, PDF textual ou Word (.docx). Confira as movimentações antes de salvar. Data, valor, entrada/saída e, quando identificáveis, horário e estabelecimento serão registrados.</Text>
     <Text style={styles.muted}>Até 5 MiB e 2.000 movimentações por arquivo; 6 envios/minuto e 120/dia. Para vários anos, envie por períodos. Layouts não reconhecidos serão recusados; prefira CSV/OFX.</Text>
-    {!preview && <Button label="Selecionar extrato" busy={busy} onPress={choose} />}
+    {!preview && <>
+      <Text style={styles.h2}>Instituição financeira (obrigatório)</Text>
+      <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
+        {INSTITUTIONS.map(([id, label]) => <Pressable key={id} accessibilityRole="radio"
+          accessibilityLabel={label} accessibilityState={{ checked: institution === id, disabled: busy }}
+          disabled={busy} onPress={() => setInstitution(id)}
+          style={{ padding: 12, borderWidth: 2, borderRadius: 8, borderColor: institution === id ? colors.green : colors.line }}>
+          <Text style={styles.body}>{institution === id ? "● " : "○ "}{label}</Text>
+        </Pressable>)}
+      </View>
+      <Button label="Selecionar extrato" disabled={!institution} busy={busy} onPress={choose} />
+    </>}
+    {busy && <Text accessibilityRole="alert" style={styles.body}>Processando solicitação. Aguarde…</Text>}
     {!preview && pending.map(p => <Button key={p.id} label="Retomar prévia pendente" secondary busy={busy} onPress={() => run(async () => show(await api<Preview>(`/imports/${p.id}`)))} />)}
     {preview && <>
       <Text style={styles.h2}>Conferir {preview.rows.length} movimentações</Text>
@@ -68,6 +95,7 @@ export function StatementImport() {
       <Button label="Selecionar sem possíveis duplicatas" secondary disabled={busy} onPress={() => setSelected(new Set(preview.rows.filter(r => !r.possible_duplicate).map(r => r.index)))} />
       {preview.rows.slice(page * 25, page * 25 + 25).map(r => <Pressable key={r.index} disabled={busy} accessibilityRole="checkbox" aria-checked={selected.has(r.index)} aria-disabled={busy} accessibilityState={{ checked: selected.has(r.index), disabled: busy }} onPress={() => setSelected(old => { const next = new Set(old); next.has(r.index) ? next.delete(r.index) : next.add(r.index); return next; })} style={{ padding: 12, borderWidth: 1, borderRadius: 8, borderColor: selected.has(r.index) ? colors.green : colors.line }}>
         <Text style={styles.body}>{selected.has(r.index) ? "✓ " : "○ "}{r.on_date.split("-").reverse().join("/")} · {r.kind === "income" ? "Entrada" : "Saída"} · {money(r.amount_cents)}</Text>
+        {!!r.context?.merchant && <Text style={styles.muted}>{r.context.merchant}</Text>}
         {r.possible_duplicate && <Text style={{ color: colors.danger }}>Possível duplicata: confira antes de selecionar.</Text>}
       </Pressable>)}
       <View style={styles.row}>
@@ -78,7 +106,7 @@ export function StatementImport() {
       <Button label={`Confirmar ${selected.size} movimentações`} busy={busy} disabled={!selected.size} onPress={() => run(async () => {
         const result = await api<{ imported_count: number }>(`/imports/${preview.id}/confirm`, "POST", { selected: [...selected] });
         setPreview(null); setSelected(new Set());
-        setMessage(`${result.imported_count} movimentações importadas.`);
+        setMessage(`${result.imported_count} movimentações importadas. Entradas: ${money(income)} · Saídas: ${money(expense)}.`);
         await useFinance.getState().load(); await refresh();
       })} />
       <Button label="Descartar prévia" secondary disabled={busy} onPress={() => run(async () => {

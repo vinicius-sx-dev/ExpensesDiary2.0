@@ -106,12 +106,15 @@ docs/                  Decisões, operação e migração
 
 ## Importar extratos
 
-Em **Diário → Importar extrato**, envie CSV, OFX, XML, PDF textual ou DOCX e confira
-as entradas/saídas antes de confirmar. Apenas data, valor e direção são importados.
-O suporte depende da estrutura exportada, não da instituição; layouts ambíguos são
-recusados. Consulte [formatos, segurança e configuração](docs/STATEMENT_IMPORTS.md).
+Em **Diário → Importar extrato**, selecione a instituição (10 opções), envie CSV,
+OFX, XML, PDF textual ou DOCX e confira as entradas/saídas antes de confirmar.
+PicPay possui adaptação para CSV e PDF por data agrupada, validada com amostra real.
+Os outros perfis aceitam os contratos tabulares/OFX documentados; ainda exigem
+amostras reais para validar variantes de layout. Horários e estabelecimentos
+identificáveis seguem para o contexto criptografado. Layouts ambíguos são recusados. Consulte [formatos, segurança e configuração](docs/STATEMENT_IMPORTS.md).
 Exige a migração `002_statement_imports`, chave privada `STATEMENT_ENCRYPTION_KEY`
-e Linux/WSL para processamento limitado. Produção exige também `DATABASE_SSL_CA`
+e Linux/WSL para processamento limitado (Windows local somente com
+`ENVIRONMENT=development` e `ALLOW_WINDOWS_IMPORT_DEV=true`). Produção exige também `DATABASE_SSL_CA`
 para conexão MySQL com TLS validado; configure criptografia de volumes/backups.
 
 ## Pluggy (base mock)

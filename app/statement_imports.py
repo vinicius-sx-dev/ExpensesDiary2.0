@@ -15,21 +15,24 @@ from uuid import UUID, uuid4
 
 import anyio
 from cryptography.fernet import InvalidToken
-from app.crypto import cipher
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import Field
 from sqlalchemy import delete, select, update
 from sqlalchemy.exc import IntegrityError
 from starlette.concurrency import run_in_threadpool
+from starlette.datastructures import UploadFile
+from starlette.formparsers import MultiPartException, MultiPartParser
 
 from app.balance import lock_wallet
 from app.config import settings
+from app.crypto import cipher
 from app.db import SessionLocal, get_db
+from app.ingestion import make_entry
 from app.models import Entry, ImportLease, StatementImport
 from app.schemas import Strict
-from app.ingestion import make_entry
 from app.security import current_user, limit
 from app.statement_parser import MAX_BYTES, MAX_ROWS
+from app.statement_parsers import REGISTRY
 
 router = APIRouter(prefix="/imports", tags=["Extratos"])
 FORMATS = {"csv", "pdf", "xml", "ofx", "docx"}
@@ -40,6 +43,11 @@ MIMES = {
     "ofx": {"application/x-ofx", "application/ofx", "text/plain"},
     "docx": {"application/vnd.openxmlformats-officedocument.wordprocessingml.document"},
 }
+
+
+class MemoryMultipartParser(MultiPartParser):
+    # Total body is capped before parsing. Never spill a bank statement to /tmp.
+    spool_max_size = MAX_BYTES + 65536
 
 
 def fingerprint(data, uid):
@@ -79,7 +87,7 @@ def release_slot(token):
         db.commit()
 
 
-def parse_isolated(data, fmt):
+def parse_isolated(data, fmt, institution=None):
     windows_dev = (
         os.name == "nt"
         and settings.environment == "development"
@@ -88,8 +96,7 @@ def parse_isolated(data, fmt):
 
     if os.name != "posix" and not windows_dev:
         raise HTTPException(
-            503,
-            "Importação requer Linux ou ambiente Windows de desenvolvimento autorizado."
+            503, "Importação requer Linux ou ambiente Windows de desenvolvimento autorizado."
         )
     try:
         worker_env = {
@@ -108,30 +115,47 @@ def parse_isolated(data, fmt):
                 "-B",
                 str(Path(__file__).with_name("statement_worker.py")),
                 fmt,
+                *([institution] if institution else []),
             ],
             input=data,
             stdout=subprocess.PIPE,
             stderr=subprocess.DEVNULL,
             timeout=12,
-            cwd=(
-                os.environ.get("TEMP", os.environ.get("TMP"))
-                if os.name == "nt"
-                else "/tmp"
-            ),
+            cwd=(os.environ.get("TEMP", os.environ.get("TMP")) if os.name == "nt" else "/tmp"),
             env=worker_env,
-            check=True,
+            check=False,
         )
         if len(result.stdout) > 512 * 1024:
             raise ValueError()
         rows = json.loads(result.stdout)
+        if result.returncode or isinstance(rows, dict):
+            code = rows.get("error") if isinstance(rows, dict) else None
+            messages = {
+                "worker_unavailable": "O processador de extratos está indisponível. Verifique a instalação do servidor e tente novamente.",
+                "institution_mismatch": "O arquivo pertence a outra instituição. Confira o banco selecionado.",
+                "invalid_institution": "Selecione uma instituição financeira válida.",
+                "unsupported_layout": "Layout não reconhecido, arquivo corrompido ou protegido. Confira o banco e exporte CSV/OFX. Nenhum lançamento foi salvo.",
+            }
+            raise HTTPException(
+                503 if code == "worker_unavailable" else 422,
+                messages.get(code, messages["unsupported_layout"]),
+                headers={"X-Error-Code": code if code in messages else "unsupported_layout"},
+            )
         if not 1 <= len(rows) <= MAX_ROWS:
             raise ValueError()
         return rows
-    except (subprocess.SubprocessError, ValueError):
+    except subprocess.TimeoutExpired:
         raise HTTPException(
-            422,
-            "Extrato inválido, ambíguo, protegido ou não suportado. Exporte CSV/OFX. Nenhum lançamento foi salvo.",
-        )
+            504,
+            "O processamento excedeu o tempo limite. Envie um período menor.",
+            headers={"X-Error-Code": "processing_timeout"},
+        ) from None
+    except (subprocess.SubprocessError, ValueError, OSError):
+        raise HTTPException(
+            503,
+            "O processador de extratos está indisponível. Tente novamente.",
+            headers={"X-Error-Code": "worker_unavailable"},
+        ) from None
 
 
 def decrypt(row, uid):
@@ -171,8 +195,8 @@ def preview(row, db, uid):
     }
 
 
-def store_preview(data, fmt, uid):
-    rows = parse_isolated(data, fmt)
+def store_preview(data, fmt, uid, institution=None):
+    rows = parse_isolated(data, fmt, institution)
     digest = fingerprint(data, uid)
     now = int(time.time())
     with SessionLocal() as db:
@@ -223,13 +247,17 @@ def store_preview(data, fmt, uid):
 
 
 @router.post("/preview")
-async def upload(request: Request, format: str = Query(...), user=Depends(current_user)):
+async def upload(
+    request: Request,
+    format: str | None = Query(None),
+    institution: str | None = Query(None),
+    user=Depends(current_user),
+):
     cipher()
-    if format not in FORMATS:
-        raise HTTPException(415, "Use CSV, OFX, XML, PDF textual ou DOCX sem macros.")
     mime = request.headers.get("content-type", "").split(";")[0].strip().lower()
-    if mime not in MIMES[format] | {"application/octet-stream"}:
-        raise HTTPException(415, "Tipo de conteúdo incompatível com o formato informado.")
+    multipart = mime == "multipart/form-data"
+    if not multipart:
+        validate_upload_metadata(format, institution, mime)
     for scope, maximum, seconds in [("import-minute", 6, 60), ("import-day", 120, 86400)]:
         await run_in_threadpool(limit, scope, str(user.id), maximum, seconds)
     await run_in_threadpool(
@@ -241,16 +269,54 @@ async def upload(request: Request, format: str = Query(...), user=Depends(curren
         try:
             with anyio.fail_after(20):
                 async for chunk in request.stream():
-                    if len(data) + len(chunk) > MAX_BYTES:
+                    if len(data) + len(chunk) > MAX_BYTES + (65536 if multipart else 0):
                         raise HTTPException(
                             413, "Limite de 5 MiB por arquivo. Divida o histórico por período."
                         )
                     data.extend(chunk)
         except TimeoutError:
             raise HTTPException(408, "Tempo limite de envio excedido.")
-        return await run_in_threadpool(store_preview, bytes(data), format, user.id)
+        if multipart:
+            # Parse only AFTER authentication, rate limit and the total streamed size cap.
+            async def stream():
+                yield bytes(data)
+
+            try:
+                form = await MemoryMultipartParser(
+                    request.headers, stream(), max_files=1, max_fields=2, max_part_size=256
+                ).parse()
+            except MultiPartException:
+                raise HTTPException(
+                    400, "Envio multipart inválido. Selecione o arquivo novamente."
+                ) from None
+            try:
+                if len(form.multi_items()) != 2 or set(form.keys()) != {"file", "institution"}:
+                    raise HTTPException(422, "Envie um arquivo e a instituição selecionada.")
+                file, selected = form["file"], form["institution"]
+                if not isinstance(file, UploadFile) or not isinstance(selected, str):
+                    raise HTTPException(422, "Arquivo ou instituição inválidos.")
+                file_format = (file.filename or "").rsplit(".", 1)[-1].lower()
+                validate_upload_metadata(
+                    file_format, selected, (file.content_type or "application/octet-stream").lower()
+                )
+                if file.size is None or not 0 < file.size <= MAX_BYTES:
+                    raise HTTPException(413, "O arquivo precisa ter entre 1 byte e 5 MiB.")
+                content = await file.read(MAX_BYTES + 1)
+            finally:
+                await form.close()
+            return await run_in_threadpool(store_preview, content, file_format, user.id, selected)
+        return await run_in_threadpool(store_preview, bytes(data), format, user.id, institution)
     finally:
         await run_in_threadpool(release_slot, token)
+
+
+def validate_upload_metadata(fmt, institution, mime):
+    if institution not in REGISTRY:
+        raise HTTPException(422, "Selecione uma instituição financeira válida.")
+    if fmt not in FORMATS:
+        raise HTTPException(415, "Use CSV, OFX, XML, PDF textual ou DOCX sem macros.")
+    if mime not in MIMES[fmt] | {"application/octet-stream"}:
+        raise HTTPException(415, "Tipo de conteúdo incompatível com o formato informado.")
 
 
 @router.get("")

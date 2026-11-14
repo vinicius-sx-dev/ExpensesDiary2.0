@@ -5,27 +5,64 @@ marque as linhas que deseja importar. A confirmação grava entradas/saídas no 
 livro de lançamentos utilizado pelo saldo, metas e relatórios. Categoria inicial:
 `outros` / `outras_receitas`; meio de pagamento: `other`; descrição vazia.
 
-Somente **data, valor em centavos e direção** são extraídos para a prévia. CPF,
-conta, agência, nomes de terceiros, locais, descrições e nome do arquivo não são
-persistidos nem enviados a IA/antivírus/serviços externos. O arquivo original fica
-somente na memória durante a requisição e é descartado. No app nativo, a cópia
-criada pelo seletor no cache é removida após o envio; o original do usuário não é apagado.
+O seletor de instituição é obrigatório. São extraídos data, valor em centavos e direção;
+quando explicitamente identificáveis, horário e estabelecimento alimentam o schema
+unificado (`make_entry` / `MovementContext`). CPF, conta, agência e nomes de pessoas
+em transferências Pix não são persistidos. Descrições livres não viram estabelecimentos:
+usamos colunas explícitas ou prefixos de compra reconhecidos. Documentos em campos de
+estabelecimento são removidos; links, markup e controles perigosos são recusados.
+Não há serviço externo/IA lendo o arquivo. O arquivo original permanece em memória,
+inclusive durante o multipart, e não é gravado no repositório ou banco. No app nativo,
+a cópia do seletor no cache é removida; o original do usuário não é apagado.
+
+## Diagnóstico da falha corrigida
+
+- O transporte anterior era binário (`application/octet-stream`), compatível entre app
+  e servidor; não era multipart. Agora ambos usam `file` + `institution` em FormData.
+  O cliente deixa o fetch gerar `Content-Type` e boundary, mantendo Bearer e X-Device-ID.
+- No PDF PicPay, a data vem no cabeçalho do grupo por extenso e as linhas têm horário.
+  O leitor anterior exigia data completa por linha e não reconhecia esse layout.
+- No CSV PicPay, `tipo` contém a operação, não C/D; há `origem / destino`, `forma de
+  pagamento` e o sinal Unicode `−`. O parser anterior rejeitava colunas e sinal.
+- PDFs reais usam mapas de fontes ToUnicode. O codec UTF-16 era carregado tardiamente
+  depois do bloqueio de filesystem do worker: o teste direto passava e o worker
+  levantava PermissionError. Agora codecs são pré-carregados antes do audit hook,
+  mantendo o bloqueio. Um PDF sintético com ToUnicode cobre essa regressão via HTTP.
 
 ## Formatos e compatibilidade real
 
-O importador identifica **estruturas**, não a marca do banco. Não existe homologação
-universal de BB, PicPay, Bradesco, Itaú, Nubank ou qualquer outra instituição.
-Exportações dessas instituições podem funcionar se corresponderem aos contratos
-abaixo. Os testes são sintéticos e não demonstram cobertura de todos os bancos.
-Para acrescentar adaptadores, usar amostras anonimizadas e testes de totais/direção.
+`app/statement_parsers` contém o registro/factory de estratégias imutáveis. A estratégia
+PicPay trata CSV e PDF próprios; as demais configuram aliases e identidade da instituição
+sobre os leitores seguros compartilhados. Não se alteram aliases globais por requisição.
+
+| Identificador | Instituição | Cobertura e evidência |
+| --- | --- | --- |
+| PICPAY | PicPay | CSV fornecido e PDF real de 17 páginas validado via HTTP/worker: 118 linhas. PDF agrupado por data, nomes quebrados, rodapés e horários. |
+| NUBANK | Nubank | Contrato Data/Valor/Identificador/Descrição; fixture sintética. |
+| BANCO_DO_BRASIL | Banco do Brasil | Aliases Data movimento/Lote/Histórico/Documento/Valor R$; fixture sintética. |
+| ITAU | Itaú | Data/Lançamento/Ag./Origem/Valor (R$)/Saldo (R$); fixture sintética. |
+| BRADESCO | Bradesco | Data/Histórico/Docto./Crédito (R$)/Débito (R$)/Saldo (R$); fixture sintética. |
+| SANTANDER | Santander | Data de movimentação/Descrição do lançamento/Valor (R$); fixture sintética. |
+| CAIXA | Caixa Econômica Federal | Data mov./Nr. doc./Histórico/Valor (R$), sufixos C/D; fixture sintética. |
+| BTG | BTG Pactual | Data de liquidação/Descrição do movimento/Valor (R$); fixture sintética. |
+| SICREDI | Sicredi | Data lanc./Num. documento/Histórico/Valor (R$); fixture sintética. |
+| MERCADO_PAGO | Mercado Pago | DATE/TRANSACTION_TYPE/REFERENCE_ID/TRANSACTION_NET_AMOUNT; fixture sintética. |
+
+**Os nove perfis sem amostra real não são homologação dos extratos de produção desses
+bancos.** Variantes não reconhecidas continuam recusadas. Fixtures sintéticas validam
+os contratos implementados e a integração HTTP, não a totalidade dos layouts comerciais.
 
 | Formato | Contrato aceito |
 | --- | --- |
-| CSV | UTF-8/BOM ou Windows-1252, delimitadores vírgula/ponto e vírgula/tab. Cabeçalho na primeira linha: data + valor assinado, ou data + crédito + débito. Tipo C/D opcional. Aliases em `statement_parser.ALIASES`. Colunas desconhecidas e linhas inconsistentes são recusadas. |
-| OFX | OFX 1.x SGML e 2.x XML, `CURDEF=BRL`, `STMTTRN`, `DTPOSTED`, `TRNAMT` assinado. Não utiliza conta/FITID/memo. |
-| XML | OFX; ISO 20022 camt.053.001.xx, apenas Ntry contabilizado BOOK, BRL, BookgDt/Dt; ou esquema simples descrito abaixo. Não aceita XML fiscal ou documento arbitrário. |
-| PDF | PDF com texto, até 100 páginas, tabela com cabeçalho reconhecido, colunas separadas por espaços e datas completas. Conteúdo ativo, links, formulários, anexos, senha, imagem/OCR e layout ambíguo são recusados. Não tenta adivinhar o sinal pela descrição. |
-| Word | DOCX com uma tabela reconhecida. Não aceita DOC binário, DOCM, macros, imagens, objetos incorporados, campos ou relações externas. |
+| CSV | UTF-8/BOM ou Windows-1252; vírgula, ponto e vírgula ou tab. Cabeçalho reconhecido após até 29 linhas de preâmbulo. Data + valor assinado ou crédito/débito. PicPay usa seis colunas específicas, horário e operação. Colunas desconhecidas e linhas inconsistentes são recusadas. |
+| OFX | OFX 1.x SGML e 2.x XML em BRL, STMTTRN/DTPOSTED/TRNAMT. BANKID verifica instituição quando reconhecido. Conta, FITID e MEMO não são persistidos. |
+| XML | OFX, camt.053.001.xx contabilizado BOOK em BRL com BookgDt/Dt, ou esquema simples abaixo. |
+| PDF | PicPay por data agrupada; nos demais perfis, tabela explícita com datas completas e colunas reconhecidas. Máximo 100 páginas. Sem OCR, conteúdo ativo, links, formulários, anexos ou senha. |
+| DOCX | Uma tabela reconhecida; valida emissor em parágrafos externos à tabela. Sem DOC, DOCM, macros, imagens, objetos, campos e relações externas. |
+
+A validação cruzada usa metadados de emissor, assinatura do cabeçalho PicPay e BANKID
+OFX. Não procura bancos dentro de descrições de transferências. A ausência de identidade
+não prova qual banco emitiu o arquivo: um layout neutro compatível pode ser importado.
 
 XLS/XLSX, imagens, ZIP avulso e outros formatos não são aceitos nesta versão.
 Para documentos recusados, prefira exportar CSV ou OFX diretamente da instituição.
@@ -42,7 +79,8 @@ Data;Valor;Tipo
 Valor sem Tipo usa o sinal: positivo = entrada, negativo = saída. Não importar
 fatura de cartão como extrato de conta: o sinal e a contabilização são diferentes.
 `1.234` é ambíguo e recusado; use `1234,00`, `1.234,00` ou `1234.00`.
-Linhas de saldo/total dentro de uma tabela CSV são recusadas, não contabilizadas.
+Resumos explicitamente identificados como saldo anterior/final ou total de entradas/saídas
+são ignorados; linhas datadas ambíguas com saldo/total são recusadas.
 Datas aceitas: dd/mm/aaaa, aaaa-mm-dd, dd-mm-aaaa, dd.mm.aaaa, desde 2000 até hoje.
 
 XML simples (também aceita `statement/transaction` e `date/amount/direction`):
@@ -73,7 +111,11 @@ o saldo exibido é o fluxo registrado e não uma conciliação bancária garanti
 
 ## Limites e contenção
 
-- Autenticação e limites antes da leitura do corpo; corpo binário, sem multipart/base64.
+- Autenticação e limites antes da leitura do corpo; multipart com um arquivo e instituição.
+- Envelope multipart limitado a 5 MiB + 64 KiB; arquivo limitado a 5 MiB.
+  Até dois campos de texto durante parsing (256 bytes cada), contrato final exatamente
+  um `institution` e um `file`; duplicatas e campos extras são recusados.
+  Spool em memória, fechado em sucesso ou erro, sem temporários no disco.
 - 5 MiB por arquivo, 2.000 movimentos, 100 páginas PDF e 2 MiB de texto extraído.
 - DOCX: até 150 membros, 10 MiB descompactados totais, 2 MiB por membro,
   razão de compressão máxima 100:1; sem extração para disco.
@@ -99,7 +141,9 @@ POSIX. **Isso é contenção em camadas, não uma sandbox de sistema operacional
 certificação antivírus.** Em produção, executar a API sob usuário sem privilégios,
 filesystem somente leitura, sem montagem de segredos desnecessários, e limites de
 CPU/memória do contêiner. Não prometer ausência de malware por validação de formato.
-O importador requer Linux/WSL; no Windows puro retorna 503 para não perder limites.
+Produção requer Linux/WSL. Windows local é permitido apenas com
+`ENVIRONMENT=development` e `ALLOW_WINDOWS_IMPORT_DEV=true`, preservando os limites
+de bytes, timeout e audit hook, mas sem os limites POSIX de CPU/memória.
 
 ## Criptografia e implantação
 
@@ -124,12 +168,14 @@ O importador requer Linux/WSL; no Windows puro retorna 503 para não perder limi
    Se houver TLS por mTLS, adaptar a configuração de certificado cliente.
 4. HTTPS entre app e API é obrigatório na versão de produção do app. Termine TLS
    no proxy, não exponha diretamente a porta interna da API, limite o corpo a
-   5 MiB, imponha timeouts e limite de conexões. Desative buffering de uploads para
+   5 MiB + 64 KiB para acomodar o envelope multipart, imponha timeouts e limite de conexões. Desative buffering de uploads para
    disco, gravação de corpo de requests, traces de payload e swap/core dumps sem
    criptografia. Não registrar cabeçalhos de autenticação nem dados financeiros.
 5. Configure criptografia de volumes/tablespaces e backups no provedor/MySQL e
    guarde chaves fora do banco. **Lançamentos confirmados mantêm campos numéricos
    consultáveis do modelo existente: não são criptografados campo a campo.**
+   Estabelecimento/horário ficam em `protected_context`, criptografado com Fernet
+   e vinculado a usuário/request_id. O escopo de criptografia não foi ampliado.
    TLS protege envio ao banco; a prévia tem criptografia na aplicação; a proteção
    dos dados definitivos em repouso depende da infraestrutura. Não são equivalentes.
 6. Agende `python -m app.maintenance` ao menos a cada hora para limpar prévias
@@ -143,15 +189,47 @@ e os limites de extração descritos no [pypdf](https://pypdf.readthedocs.io/en/
 
 ## API
 
-`POST /imports/preview?format=csv` recebe corpo binário com Bearer e X-Device-ID;
-retorna id, expires_at, rows (index/data/valor/direção/possible_duplicate) e totais.
-`GET /imports` lista prévias pendentes; `GET /imports/{id}` retoma uma prévia;
+`POST /imports/preview` recebe `multipart/form-data` com `file` (nome/extensão e MIME)
+e `institution` (um dos identificadores acima), Bearer e X-Device-ID. O cliente não
+define Content-Type manualmente. Retorna id, expires_at, rows (index/data/valor/direção,
+context quando disponível, possible_duplicate) e totais.
+
+Compatibilidade com clientes binários: `POST /imports/preview?format=csv&institution=PICPAY`
+ainda aceita bytes; instituição é obrigatória também nesse contrato. Atualize clientes
+antigos que não enviam instituição. Não há migração de banco nova nesta mudança.
+
+`GET /imports` lista prévias; `GET /imports/{id}` retoma;
 `DELETE /imports/{id}` descarta; `POST /imports/{id}/confirm` recebe
 `{"selected":[0,1]}`. O cliente nunca reenvia valores editados para confirmar.
 
+Erros: 400 envelope inválido; 413 tamanho; 415 formato/MIME; 422 seleção/layout/banco
+incompatível; 429 limites; 503 worker indisponível; 504 tempo de processamento excedido. `X-Error-Code` diferencia
+`institution_mismatch`, `unsupported_layout`, `invalid_institution` e
+`worker_unavailable` / `processing_timeout` sem expor texto, nomes de arquivos ou stack traces.
+
 ## Validação
 
-Testes cobrem CSV/XML/OFX/DOCX/PDF sintéticos, arquivos falsos, XXE, conteúdo ativo,
-bomba ZIP, limites de envio, isolamento de usuário, expiração, criptografia,
-deduplicação, saldo e idempotência. Teste concorrente exige MySQL e roda no CI.
-A suíte de interface verifica seleção, revisão e confirmação em larguras diferentes.
+```sh
+python -m pytest -q
+cd mobile
+npm run typecheck
+node --experimental-strip-types --test tests/*.test.mjs
+```
+
+`tests/test_bank_statement_uploads.py` envia multipart real para as dez estratégias,
+passa pelo subprocesso real, verifica prévia criptografada e confirma os lançamentos.
+Cobre CSV, PDF, OFX e DOCX, emissor incompatível, tamanho/MIME, autenticação, rate limit,
+CORS, codecs Unicode e saneamento. Os testes anteriores continuam cobrindo XML,
+XXE, conteúdo ativo, bomba ZIP, isolamento de usuário, expiração, saldo e idempotência.
+O teste concorrente exige MySQL e roda no CI. As fixtures versionadas são fictícias.
+
+Para repetir a validação da amostra privada, opcionalmente defina
+`PRIVATE_STATEMENT_PDF=/caminho/privado.pdf` e execute somente
+`tests/test_bank_statement_uploads.py::test_private_picpay_pdf_full_http`.
+Esse teste é específico da amostra de 118 movimentos e não grava seu conteúdo no Git.
+
+A suíte Playwright verifica as dez opções, seleção obrigatória, corpo multipart com
+boundary gerado pelo browser, autenticação, revisão e confirmação em três larguras.
+A suíte de transporte também verifica o reenvio de FormData após renovar token.
+Testes de interface usam respostas simuladas; testes HTTP usam o backend real.
+Teste Android/iOS físicos antes do release; o ambiente de desenvolvimento aqui é Linux.

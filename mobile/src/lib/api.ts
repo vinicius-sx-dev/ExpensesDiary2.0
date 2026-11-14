@@ -24,17 +24,18 @@ async function request<T>(
   if (!__DEV__ && !BASE.startsWith("https://"))
     throw new Error("Configure uma API HTTPS para a versão de produção.");
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), path.startsWith("/reports/weekly/insights") ? 50000 : 25000);
+  const timer = setTimeout(() => controller.abort(), path.startsWith("/reports/weekly/insights") ? 50000 : path.startsWith("/imports/preview") ? 45000 : 25000);
+  const isForm = typeof FormData !== "undefined" && body instanceof FormData;
   try {
     const response = await fetch(BASE + path, {
       method,
       signal: controller.signal,
       headers: {
-        "Content-Type": (typeof Blob !== "undefined" && body instanceof Blob) || body instanceof Uint8Array ? "application/octet-stream" : "application/json",
+        ...(isForm ? {} : { "Content-Type": (typeof Blob !== "undefined" && body instanceof Blob) || body instanceof Uint8Array ? "application/octet-stream" : "application/json" }),
         "X-Device-ID": await deviceId(),
         ...(access ? { Authorization: `Bearer ${access}` } : {}),
       },
-      ...(body !== undefined ? { body: (typeof Blob !== "undefined" && body instanceof Blob) || body instanceof Uint8Array ? body as BodyInit : JSON.stringify(body) } : {}),
+      ...(body !== undefined ? { body: isForm || (typeof Blob !== "undefined" && body instanceof Blob) || body instanceof Uint8Array ? body as BodyInit : JSON.stringify(body) } : {}),
     });
     let data: any = null;
     const text = response.status === 204 ? "" : await response.text();

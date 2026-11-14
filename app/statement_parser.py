@@ -56,7 +56,7 @@ def day(s):
 
 
 def money(s, decimal_comma):
-    s = s.strip().replace("R$", "").replace(" ", "").replace("\xa0", "")
+    s = s.strip().replace("−", "-").replace("R$", "").replace(" ", "").replace("\xa0", "")
     # Do not guess ambiguous thousands/decimal separators.
     pattern = (
         r"[+-]?(?:\d+|\d{1,3}(?:\.\d{3})+)(?:,\d{2})?" if decimal_comma else r"[+-]?\d+(?:\.\d{2})?"
@@ -122,14 +122,24 @@ ALIASES = {
 }
 
 
-def table(rows):
+def table(rows, aliases=None):
     rows = [r for r in rows if any(c.strip() for c in r)]
     if not 2 <= len(rows) <= MAX_ROWS + 1 or len(rows[0]) > 20:
         reject()
-    headers = [ALIASES.get(norm(c)) for c in rows[0]]
+    headers = [(aliases or ALIASES).get(norm(c)) for c in rows[0]]
     if None in headers or headers.count("date") != 1:
         reject()
-    for k in ("amount", "direction", "credit", "debit", "description", "balance", "merchant", "address", "time"):
+    for k in (
+        "amount",
+        "direction",
+        "credit",
+        "debit",
+        "description",
+        "balance",
+        "merchant",
+        "address",
+        "time",
+    ):
         if headers.count(k) > 1:
             reject()
     if not (("amount" in headers) ^ ("credit" in headers and "debit" in headers)):
@@ -174,14 +184,20 @@ def extract_context(values, on_date):
     for key, maximum in (("merchant", 120), ("address", 200)):
         value = values.get(key, "").strip()
         if value:
-            if len(value) > maximum or re.search(r"[<>\x00-\x1f]|https?://|\b\d{3}\.?\d{3}\.?\d{3}-?\d{2}\b|\b\d{2}\.?\d{3}\.?\d{3}/?\d{4}-?\d{2}\b", value, re.I):
+            if len(value) > maximum or re.search(
+                r"[<>\x00-\x1f]|https?://|\b\d{3}\.?\d{3}\.?\d{3}-?\d{2}\b|\b\d{2}\.?\d{3}\.?\d{3}/?\d{4}-?\d{2}\b",
+                value,
+                re.I,
+            ):
                 reject()
             context[key] = value
     clock = values.get("time", "").strip()
     if clock:
         if not re.fullmatch(r"(?:[01]\d|2[0-3]):[0-5]\d", clock):
             reject()
-        timestamp = datetime.fromisoformat(on_date + "T" + clock).replace(tzinfo=ZoneInfo("America/Sao_Paulo"))
+        timestamp = datetime.fromisoformat(on_date + "T" + clock).replace(
+            tzinfo=ZoneInfo("America/Sao_Paulo")
+        )
         if timestamp > datetime.now(timestamp.tzinfo):
             reject()
         context["occurred_at"] = timestamp.isoformat()
@@ -288,7 +304,7 @@ def ofx_rows(data):
     return xml_rows(body.encode())
 
 
-def docx_rows(data):
+def docx_table(data, with_metadata=False):
     if not data.startswith(b"PK\x03\x04"):
         reject()
     with zipfile.ZipFile(io.BytesIO(data)) as z:
@@ -332,18 +348,28 @@ def docx_rows(data):
         tables = root.findall(".//w:tbl", ns)
         if len(tables) != 1:
             reject()
-        return table(
+        rows = [
             [
-                [
-                    "".join(t.text or "" for t in cell.findall(".//w:t", ns))
-                    for cell in row.findall("w:tc", ns)
-                ]
-                for row in tables[0].findall("w:tr", ns)
+                "".join(t.text or "" for t in cell.findall(".//w:t", ns))
+                for cell in row.findall("w:tc", ns)
             ]
-        )
+            for row in tables[0].findall("w:tr", ns)
+        ]
+        if with_metadata:
+            # Paragraphs outside the table identify the issuer, never transfer counterparties.
+            paragraphs = root.findall("w:body/w:p", ns)
+            metadata = "\n".join(
+                "".join(t.text or "" for t in p.findall(".//w:t", ns)) for p in paragraphs
+            )
+            return rows, metadata
+        return rows
 
 
-def pdf_rows(data):
+def docx_rows(data):
+    return table(docx_table(data))
+
+
+def pdf_lines(data):
     from pypdf import PdfReader
     from pypdf.generic import ArrayObject, DictionaryObject, IndirectObject
 
@@ -395,6 +421,11 @@ def pdf_rows(data):
         if total > MAX_TEXT:
             reject()
         lines.extend(line.strip() for line in s.splitlines() if line.strip())
+    return lines
+
+
+def pdf_rows(data):
+    lines = pdf_lines(data)
     # Conservative tabular PDFs only: explicit column header, full date, no guessed sign.
     rows = []
     header = None
@@ -418,7 +449,7 @@ def pdf_rows(data):
     return table(rows)
 
 
-def parse(data, fmt):
+def parse(data, fmt, institution=None):
     if not data or len(data) > MAX_BYTES:
         reject()
     parsers = {
@@ -430,7 +461,14 @@ def parse(data, fmt):
     }
     if fmt not in parsers:
         reject()
-    rows = parsers[fmt](data)
+    if institution is not None:
+        if __package__:
+            from .statement_parsers import parse_bank
+        else:
+            from statement_parsers import parse_bank
+        rows = parse_bank(data, fmt, institution)
+    else:
+        rows = parsers[fmt](data)
     if not 1 <= len(rows) <= MAX_ROWS:
         reject()
     return rows

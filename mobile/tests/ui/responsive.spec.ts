@@ -146,9 +146,18 @@ for (const width of [360, 768, 1280]) {
         ),
       ).toBeVisible();
       if (name === "Diário") {
+        await expect(page.getByRole("button", { name: "Selecionar extrato" })).toBeDisabled();
+        await expect(page.getByRole("radio")).toHaveCount(10);
+        await page.getByRole("radio", { name: "Nubank", exact: true }).click();
+        const uploadRequest = page.waitForRequest(r => new URL(r.url()).pathname === "/imports/preview");
         const fileChooser = page.waitForEvent("filechooser");
         await page.getByRole("button", { name: "Selecionar extrato" }).click();
         await (await fileChooser).setFiles("tests/fixtures/statement.csv");
+        const uploaded = await uploadRequest;
+        expect(uploaded.headers()["content-type"]).toMatch(/^multipart\/form-data; boundary=/);
+        expect(uploaded.headers().authorization).toBe("Bearer ui-fixture-only");
+        expect(uploaded.postData()).toContain('name="institution"\r\n\r\nNUBANK');
+        expect(uploaded.postData()).toContain('name="file"; filename="statement.csv"');
         await expect(page.getByText("Conferir 2 movimentações")).toBeVisible();
         await expect(page.getByRole("checkbox").nth(0)).toBeChecked();
         await expect(page.getByRole("checkbox").nth(1)).not.toBeChecked();
@@ -159,7 +168,7 @@ for (const width of [360, 768, 1280]) {
         const confirmRequest = page.waitForRequest(r => r.url().endsWith("/imports/preview-fixture/confirm"));
         await page.getByRole("button", { name: "Confirmar 1 movimentações" }).click();
         expect((await confirmRequest).postDataJSON()).toEqual({ selected: [0] });
-        await expect(page.getByText("1 movimentações importadas.")).toBeVisible();
+        await expect(page.getByText(/1 movimentações importadas\. Entradas:/)).toBeVisible();
       }
       await page.screenshot({
         path: testInfo.outputPath(

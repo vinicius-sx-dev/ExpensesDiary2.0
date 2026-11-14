@@ -25,7 +25,7 @@ def key(monkeypatch):
 
 def upload(client, headers, data=CSV, fmt="csv"):
     return client.post(
-        "/imports/preview?format=" + fmt,
+        "/imports/preview?institution=NUBANK&format=" + fmt,
         content=data,
         headers={**headers, "Content-Type": "application/octet-stream"},
     )
@@ -103,7 +103,7 @@ def test_limits_and_content_type(client):
     assert upload(client, h, b"dummy", "doc").status_code == 415
     assert (
         client.post(
-            "/imports/preview?format=csv",
+            "/imports/preview?institution=NUBANK&format=csv",
             headers={**h, "Content-Type": "application/pdf"},
             content=CSV,
         ).status_code
@@ -306,7 +306,7 @@ def test_timeout_kills_worker(monkeypatch):
     monkeypatch.setattr("app.statement_imports.subprocess.run", timeout)
     with pytest.raises(HTTPException) as error:
         parse_isolated(CSV, "csv")
-    assert error.value.status_code == 422
+    assert error.value.status_code == 504
 
 
 def test_camt_booked_brl_only():

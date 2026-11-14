@@ -1,0 +1,3 @@
+data,hora,tipo,"origem / destino",valor,"forma de pagamento"
+2025-11-13,20:13,"Compra realizada","Loja Exemplo","−R$ 26,00","Com saldo"
+2025-11-13,10:00,"Pix recebido","Pessoa ficticia","+R$ 1.234,56","Com saldo"

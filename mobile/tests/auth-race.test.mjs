@@ -55,3 +55,30 @@ test('hydration cannot restore credentials after logout', async () => {
   await hydrate;
   assert.equal(useAuth.getState().refresh, null);
 });
+
+test('multipart keeps the file and institution across token refresh without a JSON content type', async () => {
+  const state = auth({ get: async () => null, set: async () => {}, remove: async () => {} });
+  state.useAuth.setState({ access: 'old-access', refresh: 'old-refresh' });
+  const requests = [];
+  const { api } = moduleAt('../src/lib/api.ts', {
+    './session': { deviceId: async () => 'test-device' }, '../stores/auth': state,
+  }, { FormData, Blob, fetch: async (url, options) => {
+    if (url.endsWith('/auth/refresh')) return { ok: true, status: 200, text: async () => '{"access_token":"new-access","refresh_token":"new-refresh"}' };
+    requests.push(options);
+    return requests.length === 1
+      ? { ok: false, status: 401, text: async () => '{"detail":"expired"}' }
+      : { ok: true, status: 200, text: async () => '{"id":"preview"}' };
+  }});
+  const body = new FormData();
+  body.append('institution', 'PICPAY');
+  body.append('file', new Blob(['data,valor\n2025-01-01,-26.00']), 'statement.csv');
+  assert.deepEqual(JSON.parse(JSON.stringify(await api('/imports/preview', 'POST', body))), { id: 'preview' });
+  assert.equal(requests.length, 2);
+  for (const request of requests) {
+    assert.equal(request.body, body);
+    assert.equal(request.headers['Content-Type'], undefined);
+    assert.equal(request.body.get('institution'), 'PICPAY');
+    assert.equal(request.headers['X-Device-ID'], 'test-device');
+  }
+  assert.equal(requests[1].headers.Authorization, 'Bearer new-access');
+});
