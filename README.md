@@ -103,3 +103,13 @@ mobile/src/lib/         Cliente HTTP, tipos e armazenamento seguro
 tests/                 Regras de negócio e segurança da API
 docs/                  Decisões, operação e migração
 ```
+
+## Importar extratos
+
+Em **Diário → Importar extrato**, envie CSV, OFX, XML, PDF textual ou DOCX e confira
+as entradas/saídas antes de confirmar. Apenas data, valor e direção são importados.
+O suporte depende da estrutura exportada, não da instituição; layouts ambíguos são
+recusados. Consulte [formatos, segurança e configuração](docs/STATEMENT_IMPORTS.md).
+Exige a migração `002_statement_imports`, chave privada `STATEMENT_ENCRYPTION_KEY`
+e Linux/WSL para processamento limitado. Produção exige também `DATABASE_SSL_CA`
+para conexão MySQL com TLS validado; configure criptografia de volumes/backups.

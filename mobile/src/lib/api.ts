@@ -30,11 +30,11 @@ async function request<T>(
       method,
       signal: controller.signal,
       headers: {
-        "Content-Type": "application/json",
+        "Content-Type": (typeof Blob !== "undefined" && body instanceof Blob) || body instanceof Uint8Array ? "application/octet-stream" : "application/json",
         "X-Device-ID": await deviceId(),
         ...(access ? { Authorization: `Bearer ${access}` } : {}),
       },
-      ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
+      ...(body !== undefined ? { body: (typeof Blob !== "undefined" && body instanceof Blob) || body instanceof Uint8Array ? body as BodyInit : JSON.stringify(body) } : {}),
     });
     let data: any = null;
     const text = response.status === 204 ? "" : await response.text();

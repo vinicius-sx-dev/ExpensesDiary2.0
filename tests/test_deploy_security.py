@@ -15,7 +15,7 @@ def production(**changes):
                     database_url='mysql+pymysql://app:placeholder@localhost/expenses',
                     jwt_secret=secrets.token_urlsafe(48), smtp_host='smtp.example.com',
                     smtp_from='app@example.com', smtp_user='app', smtp_password='placeholder',
-                    **{'allowed_hosts': ['api.example.com'], 'cors_origins': ['https://app.example.com'], **changes})
+                    **{'database_ssl_ca': '/etc/ssl/mysql-ca.pem', 'allowed_hosts': ['api.example.com'], 'cors_origins': ['https://app.example.com'], **changes})
 
 
 def test_production_fails_closed():

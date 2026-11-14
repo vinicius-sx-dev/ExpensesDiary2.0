@@ -1,3 +1,4 @@
+import { StatementImport } from "../components/StatementImport";
 import React, { useState } from "react";
 import { Text, View } from "react-native";
 import {
@@ -30,6 +31,7 @@ export function Ledger() {
   return (
     <View style={styles.stack}>
       <Text style={styles.title}>Seu dia a dia</Text>
+      <StatementImport />
       <Text style={styles.muted}>
         Lançamentos carregados, do mais recente ao mais antigo.
       </Text>
