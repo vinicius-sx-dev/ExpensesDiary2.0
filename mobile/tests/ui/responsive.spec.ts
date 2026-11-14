@@ -1,0 +1,173 @@
+import { test, expect } from "@playwright/test";
+// UI-only fixtures. The API security/finance suite exercises the actual server separately.
+const report = {
+  week_start: "2026-11-09",
+  week_end: "2026-11-12",
+  partial: true,
+  income_cents: 320000,
+  expense_cents: 84550,
+  net_cents: 235450,
+  available_cents: 205450,
+  reserved_cents: 30000,
+  unreserved_flow_cents: 205450,
+  required_weekly_cents: 15000,
+  goal_gap_cents: 0,
+  categories: [
+    { category: "mercado", amount_cents: 42550 },
+    { category: "restaurante", amount_cents: 42000 },
+  ],
+  budgets: [
+    {
+      id: 1,
+      month: "2026-11-01",
+      category: "mercado",
+      limit_cents: 80000,
+      spent_cents: 42550,
+      remaining_cents: 37450,
+      status: "within",
+    },
+  ],
+  goals: [
+    {
+      id: 1,
+      title: "Minha primeira reserva",
+      motivation: "Mais tranquilidade",
+      target_cents: 500000,
+      deadline: "2027-06-01",
+      saved_cents: 120000,
+      remaining_cents: 380000,
+      required_weekly_cents: 15000,
+      status: "in_progress",
+    },
+  ],
+  note: "Fluxo dos lançamentos informados. Não é saldo bancário.",
+};
+for (const width of [360, 768, 1280]) {
+  test(`login and finance navigation at ${width}px`, async ({
+    page,
+  }, testInfo) => {
+    await page.setViewportSize({ width, height: 900 });
+    const errors: string[] = [];
+    page.on("pageerror", (error) => errors.push(error.message));
+    await page.route("https://api.example.test/**", async (route) => {
+      const path = new URL(route.request().url()).pathname;
+      const data: Record<string, unknown> = {
+        "/auth/login": { challenge_id: "a".repeat(64), expires_in: 300 },
+        "/auth/verify": {
+          access_token: "ui-fixture-only",
+          refresh_token: "ui-fixture-only",
+        },
+        "/categories": [
+          {
+            id: "mercado",
+            label: "Mercado",
+            group: "Alimentação",
+            kind: "expense",
+          },
+          {
+            id: "restaurante",
+            label: "Restaurante",
+            group: "Alimentação",
+            kind: "expense",
+          },
+          {
+            id: "salario",
+            label: "Salário",
+            group: "Receitas",
+            kind: "income",
+          },
+        ],
+        "/movements": [
+          {
+            id: 1,
+            request_id: "fixture",
+            category: "mercado",
+            kind: "expense",
+            amount_cents: 42550,
+            on_date: "2026-11-12",
+            description: "Compras da semana",
+            payment_method: "pix",
+            essential: true,
+          },
+        ],
+        "/goals": report.goals,
+        "/budgets": report.budgets,
+        "/reports/weekly": report,
+        "/reports/history": [report],
+        "/reports/weekly/insights": {summary: "Resumo gerado pela IA.", suggestions: ["Acompanhe seu orçamento."]},
+      };
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        headers: { "Access-Control-Allow-Origin": "*" },
+        body: JSON.stringify(data[path] || {}),
+      });
+    });
+    await page.goto("/");
+    await page
+      .getByLabel("E-mail", { exact: true })
+      .fill("preview@example.com");
+    await page.getByLabel("Senha", { exact: true }).fill("preview-password");
+    await page.screenshot({
+      path: testInfo.outputPath("login.png"),
+      fullPage: true,
+    });
+    await page.getByRole("button", { name: "Continuar", exact: true }).click();
+    await page.getByLabel("Código de 6 dígitos").fill("123456");
+    await page.getByRole("button", { name: "Confirmar e entrar" }).click();
+    await expect(
+      page.getByText("Pequenos cuidados.", { exact: false }),
+    ).toBeVisible();
+    await page.screenshot({
+      path: testInfo.outputPath("home.png"),
+      fullPage: true,
+    });
+    for (const name of ["Diário", "Planos", "Semana"]) {
+      await page.getByRole("tab", { name: new RegExp(name) }).click();
+      await expect(
+        page.getByText(
+          name === "Diário"
+            ? "Seu dia a dia"
+            : name === "Planos"
+              ? "Planos que crescem"
+              : "Uma pausa para olhar",
+          { exact: true },
+        ),
+      ).toBeVisible();
+      await page.screenshot({
+        path: testInfo.outputPath(
+          `${name === "Diário" ? "ledger" : name === "Planos" ? "plans" : "weekly"}.png`,
+        ),
+        fullPage: true,
+      });
+      expect(
+        await page.evaluate(
+          () => document.documentElement.scrollWidth > innerWidth,
+        ),
+      ).toBe(false);
+    }
+    await page.getByRole("button", { name: "Enviar totais e pedir comentários à IA" }).click();
+    await expect(page.getByText("Resumo gerado pela IA.")).toBeVisible();
+    const downloadPromise = page.waitForEvent("download");
+    await page.getByRole("button", { name: "Exportar PDF do relatório exibido" }).click();
+    const download = await downloadPromise;
+    expect(download.suggestedFilename()).toBe("expenses-diary-2026-11-09.pdf");
+    await download.saveAs(testInfo.outputPath("weekly.pdf"));
+    const stream = await download.createReadStream();
+    let size = 0;
+    for await (const chunk of stream!) {
+      if (!size) expect(chunk.subarray(0, 5).toString()).toBe("%PDF-");
+      size += chunk.length;
+    }
+    expect(size).toBeGreaterThan(1000);
+    const saveDownload = page.waitForEvent("download");
+    await page.getByRole("button", { name: "Salvar retrato e exportar PDF" }).click();
+    await saveDownload;
+    await page.getByRole("button", { name: "Ver últimos retratos salvos" }).click();
+    const openDownload = page.waitForEvent("download");
+    await page.getByRole("button", { name: "Abrir 2026-11-09" }).click();
+    await openDownload;
+    await expect(page.getByText("Exibindo retrato salvo", {exact: false})).toBeVisible();
+    expect(errors).toEqual([]);
+  });
+}

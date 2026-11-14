@@ -1,0 +1,16 @@
+{
+  "expo": {
+    "name": "ExpensesDiary",
+    "slug": "expenses-diary",
+    "version": "1.0.0",
+    "orientation": "default",
+    "userInterfaceStyle": "light",
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.expensesdiary.app"
+    },
+    "android": { "package": "com.expensesdiary.app" },
+    "plugins": ["expo-secure-store"],
+    "web": { "bundler": "metro" }
+  }
+}
