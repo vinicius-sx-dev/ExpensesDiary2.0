@@ -14,6 +14,7 @@ from app.config import settings
 from app.finance import router as finance
 from app.reports import router as reports
 from app.security import limit
+from app.statement_imports import router as statement_imports
 
 logger = logging.getLogger("expenses_diary")
 
@@ -34,6 +35,9 @@ class BodyLimit:
 
     async def __call__(self, scope, receive, send):
         if scope["type"] != "http":
+            return await self.app(scope, receive, send)
+        # Upload route authenticates and acquires a shared lease BEFORE reading the body.
+        if scope.get("path") == "/imports/preview" and scope.get("method") == "POST":
             return await self.app(scope, receive, send)
         body = bytearray()
         try:
@@ -129,6 +133,7 @@ def health():
 app.include_router(auth)
 app.include_router(finance)
 app.include_router(reports)
+app.include_router(statement_imports)
 
 
 # Outer validation rejects invalid hosts before database-backed request limits.

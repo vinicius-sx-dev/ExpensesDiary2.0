@@ -6,6 +6,7 @@ from sqlalchemy import (
     CheckConstraint,
     Date,
     ForeignKey,
+    LargeBinary,
     String,
     UniqueConstraint,
 )
@@ -115,3 +116,22 @@ class WeeklyReport(Base):
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
     week_start: Mapped[date] = mapped_column(Date)
     data: Mapped[dict] = mapped_column(JSON)
+
+
+class StatementImport(Base):
+    __tablename__ = "statement_imports"
+    __table_args__ = (UniqueConstraint("user_id", "fingerprint"),)
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    fingerprint: Mapped[str] = mapped_column(String(64))
+    payload: Mapped[bytes] = mapped_column(LargeBinary(length=1024 * 1024))
+    expires_at: Mapped[int] = mapped_column(BigInteger, index=True)
+    status: Mapped[str] = mapped_column(String(12))
+    imported_count: Mapped[int] = mapped_column(default=0)
+
+
+class ImportLease(Base):
+    __tablename__ = "import_leases"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    token: Mapped[str] = mapped_column(String(32))
+    expires_at: Mapped[int] = mapped_column(BigInteger)

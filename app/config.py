@@ -11,6 +11,9 @@ class Settings(BaseSettings):
     environment: Literal["development", "test", "production"] = "development"
     registration_enabled: bool | None = None
     ai_global_hourly_limit: int = Field(default=100, ge=1, le=10000)
+    statement_encryption_key: str = ""
+    database_ssl_ca: str = ""
+    import_global_hourly_limit: int = Field(default=300, ge=1, le=10000)
     database_url: str
     jwt_secret: str = Field(min_length=32)
     jwt_issuer: str = "expenses-diary"
@@ -27,6 +30,14 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def production(self):
+        if self.statement_encryption_key:
+            from cryptography.fernet import Fernet
+            try:
+                Fernet(self.statement_encryption_key.encode())
+            except (ValueError, TypeError):
+                raise ValueError("Invalid statement encryption key") from None
+        if self.environment == "production" and not self.database_ssl_ca:
+            raise ValueError("Production requires DATABASE_SSL_CA for verified MySQL TLS")
         if self.registration_enabled is None:
             self.registration_enabled = self.environment != "production"
         if self.environment == "production":

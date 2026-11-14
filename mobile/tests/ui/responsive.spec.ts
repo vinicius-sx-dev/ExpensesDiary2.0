@@ -57,6 +57,13 @@ for (const width of [360, 768, 1280]) {
           access_token: "ui-fixture-only",
           refresh_token: "ui-fixture-only",
         },
+        "/imports": [],
+        "/imports/preview": { id: "preview-fixture", expires_at: 9999999999,
+          income_cents: 10000, expense_cents: 2000, rows: [
+            {index: 0, on_date: "2025-01-01", amount_cents: 10000, kind: "income", possible_duplicate: false},
+            {index: 1, on_date: "2025-01-02", amount_cents: 2000, kind: "expense", possible_duplicate: true},
+          ] },
+        "/imports/preview-fixture/confirm": { imported_count: 1 },
         "/categories": [
           {
             id: "mercado",
@@ -134,6 +141,22 @@ for (const width of [360, 768, 1280]) {
           { exact: true },
         ),
       ).toBeVisible();
+      if (name === "Diário") {
+        const fileChooser = page.waitForEvent("filechooser");
+        await page.getByRole("button", { name: "Selecionar extrato" }).click();
+        await (await fileChooser).setFiles("tests/fixtures/statement.csv");
+        await expect(page.getByText("Conferir 2 movimentações")).toBeVisible();
+        await expect(page.getByRole("checkbox").nth(0)).toBeChecked();
+        await expect(page.getByRole("checkbox").nth(1)).not.toBeChecked();
+        await page.getByRole("checkbox").nth(1).click();
+        await expect(page.getByRole("button", { name: "Confirmar 2 movimentações" })).toBeVisible();
+        await page.getByRole("checkbox").nth(1).click();
+        await page.screenshot({ path: testInfo.outputPath("statement-preview.png"), fullPage: true });
+        const confirmRequest = page.waitForRequest(r => r.url().endsWith("/imports/preview-fixture/confirm"));
+        await page.getByRole("button", { name: "Confirmar 1 movimentações" }).click();
+        expect((await confirmRequest).postDataJSON()).toEqual({ selected: [0] });
+        await expect(page.getByText("1 movimentações importadas.")).toBeVisible();
+      }
       await page.screenshot({
         path: testInfo.outputPath(
           `${name === "Diário" ? "ledger" : name === "Planos" ? "plans" : "weekly"}.png`,
