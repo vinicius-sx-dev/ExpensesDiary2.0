@@ -56,7 +56,7 @@ def acquire_slot():
     """Two concurrent uploads/parsers across all API workers; leases survive crashes."""
     now, token = int(time.time()), secrets.token_hex(16)
     with SessionLocal() as db:
-        for slot in range(2):
+        for slot in (1, 2):
             try:
                 db.add(ImportLease(id=slot, token="", expires_at=0))
                 db.commit()
