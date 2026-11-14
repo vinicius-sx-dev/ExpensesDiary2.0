@@ -5,6 +5,7 @@ export type Category = {
   kind: "income" | "expense";
 };
 export type Entry = {
+  context?: { merchant?: string; address?: string; occurred_at?: string; niche?: string; unplanned?: boolean };
   id: number;
   request_id: string;
   kind: "income" | "expense";
@@ -23,6 +24,8 @@ export type Budget = {
   limit_cents: number;
 };
 export type Goal = {
+  planned_monthly_cents?: number;
+  contribution_day?: number;
   id: number;
   title: string;
   motivation: string;

@@ -11,6 +11,10 @@ class Settings(BaseSettings):
     environment: Literal["development", "test", "production"] = "development"
     registration_enabled: bool | None = None
     ai_global_hourly_limit: int = Field(default=100, ge=1, le=10000)
+    advisor_price_feed_url: str = ""
+    advisor_price_feed_token: str = ""
+    expo_access_token: str = ""
+    advisor_push_enabled: bool = False
     pluggy_mock_enabled: bool = False
     pluggy_client_id: str = ""
     pluggy_client_secret: str = ""
@@ -30,9 +34,14 @@ class Settings(BaseSettings):
     smtp_from: str = ""
     groq_api_key: str = ""
     groq_model: str = "openai/gpt-oss-120b"
+    allow_windows_import_dev: bool = False
 
     @model_validator(mode="after")
     def production(self):
+        if self.advisor_price_feed_url:
+            u = urlsplit(self.advisor_price_feed_url)
+            if u.scheme != "https" or not u.hostname or u.username or u.password or u.fragment or u.query:
+                raise ValueError("Price feed must be a fixed HTTPS endpoint")
         if self.statement_encryption_key:
             from cryptography.fernet import Fernet
             try:
@@ -63,6 +72,5 @@ class Settings(BaseSettings):
             ):
                 raise ValueError("Production requires explicit hosts and HTTPS origins")
         return self
-
 
 settings = Settings()

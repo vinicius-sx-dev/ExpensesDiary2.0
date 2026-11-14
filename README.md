@@ -119,3 +119,10 @@ para conexão MySQL com TLS validado; configure criptografia de volumes/backups.
 Sincronização backend simulada, categorização e insights por regras: consulte
 [configuração, endpoints e limites da integração](docs/PLUGGY.md).
 Requer migração `003_pluggy_receipts`; habilitação explícita apenas fora de produção.
+
+
+## Orientações e simulações (branch smart-insights-advisor)
+
+A aba **Dicas** cruza padrões do diário com a meta selecionada, com simulações em centavos, custos de receitas por porção/embalagem e criptografia de metas, contextos e históricos. Escolha cidade do Paraná, meta e aporte planejado. Dados insuficientes não geram projeções inventadas.
+
+**Ativação pendente:** não há fonte comercial de preços conectada; receitas mostram preços locais indisponíveis até configurar uma fonte autorizada. Push exige EAS/FCM/APNs, consentimento e execução do job. Não basta iniciar a API. Consulte [ADVISOR.md](docs/ADVISOR.md) para limites, contrato de preços, migração 004 e ativação. Pare a aplicação antiga e preserve a chave Fernet antes da migração.

@@ -13,6 +13,8 @@ import { SafeAreaProvider, SafeAreaView } from "react-native-safe-area-context";
 import { useAuth } from "./src/stores/auth";
 import { useFinance } from "./src/stores/finance";
 import { Auth } from "./src/screens/Auth";
+import { Advisor } from "./src/screens/Advisor";
+import { observeAdviceNotification } from "./src/lib/notifications";
 import { Home } from "./src/screens/Home";
 import { Ledger } from "./src/screens/Ledger";
 import { Plans } from "./src/screens/Plans";
@@ -21,6 +23,7 @@ import { EntryForm } from "./src/components/FinanceForms";
 import { Button, ErrorBox, styles, colors } from "./src/components/ui";
 import { api } from "./src/lib/api";
 const tabs = [
+  { id: "advisor", label: "Dicas", icon: "◇" },
   { id: "home", label: "Hoje", icon: "◉" },
   { id: "ledger", label: "Diário", icon: "≡" },
   { id: "plans", label: "Planos", icon: "✳" },
@@ -38,6 +41,7 @@ function Dashboard() {
   useEffect(() => {
     void load();
   }, []);
+  useEffect(() => observeAdviceNotification(() => setTab("advisor")), []);
   function navigate(t: Tab) {
     setTab(t);
     scroll.current?.scrollTo({ y: 0, animated: false });
@@ -114,7 +118,7 @@ function Dashboard() {
         {loading && !useFinance.getState().report ? (
           <ActivityIndicator color={colors.green} />
         ) : null}
-        {tab === "home" ? (
+        {tab === "advisor" ? <Advisor /> : tab === "home" ? (
           <Home
             onAdd={() => setAdd(true)}
             onPlans={() => navigate("plans")}

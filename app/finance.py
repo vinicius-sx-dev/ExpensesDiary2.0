@@ -20,6 +20,7 @@ from app.schemas import (
     MovementRead,
 )
 from app.security import current_user
+from app.ingestion import normalized_context, make_entry
 
 router = APIRouter(tags=["Finanças"], dependencies=[Depends(current_user)])
 
@@ -45,6 +46,9 @@ def values(payload):
     data = payload.model_dump()
     if "request_id" in data:
         data["request_id"] = str(data["request_id"])
+    if "context" in data:
+        context = data.pop("context")
+        data["context"] = context  # bind ciphertext only after immutable request_id
     return data
 
 
@@ -78,6 +82,7 @@ def entries(
 def add_entry(payload: EntryInput, user=Depends(current_user), db=Depends(get_db)):
     lock_wallet(db, user.id)
     data = values(payload)
+    data["context"] = normalized_context(data["context"], payload.on_date, "manual")
     existing = db.scalar(
         select(Entry).where(Entry.user_id == user.id, Entry.request_id == data["request_id"]).with_for_update()
     )
@@ -85,7 +90,9 @@ def add_entry(payload: EntryInput, user=Depends(current_user), db=Depends(get_db
         if any(getattr(existing, k) != v for k, v in data.items()):
             raise HTTPException(409, "Identificador já utilizado")
         return existing
-    row = Entry(user_id=user.id, **data)
+    raw_context = payload.context.model_dump()
+    data.pop("context")
+    row = make_entry(user_id=user.id, source="manual", context=raw_context, **data)
     db.add(row)
     save(db)
     return row
@@ -97,7 +104,9 @@ def edit_entry(item_id: int, payload: EntryInput, user=Depends(current_user), db
     row = owned(db, Entry, item_id, user.id)
     if str(payload.request_id) != row.request_id:
         raise HTTPException(409, "Identificador imutável")
-    for k, v in values(payload).items():
+    data = values(payload)
+    data["context"] = normalized_context(data["context"], payload.on_date, row.context.get("source", "manual"))
+    for k, v in data.items():
         setattr(row, k, v)
     save(db)
     return row
@@ -229,9 +238,18 @@ def movements(offset: int = Query(0, ge=0), limit: int = Query(50, ge=1, le=100)
         Entry.payment_method, literal(None).label("goal_id")).where(Entry.user_id == user.id)
     contributions = select(Contribution.id, Contribution.request_id,
         literal("contribution"), literal("goal_contribution"), Contribution.amount_cents,
-        Contribution.on_date, Goal.title, literal(False), literal("transfer"),
+        Contribution.on_date, literal(""), literal(False), literal("transfer"),
         Contribution.goal_id).join(Goal, Goal.id == Contribution.goal_id).where(
             Contribution.user_id == user.id, Goal.user_id == user.id)
     ledger = union_all(entries, contributions).subquery()
-    return db.execute(select(ledger).order_by(ledger.c.on_date.desc(), ledger.c.kind,
-        ledger.c.id.desc()).offset(offset).limit(limit)).mappings().all()
+    rows = [dict(r) for r in db.execute(select(ledger).order_by(ledger.c.on_date.desc(), ledger.c.kind,
+        ledger.c.id.desc()).offset(offset).limit(limit)).mappings().all()]
+    goal_ids = [r["goal_id"] for r in rows if r["goal_id"]]
+    titles = {g.id: g.title for g in db.scalars(select(Goal).where(Goal.user_id == user.id, Goal.id.in_(goal_ids)))}
+    entry_ids = [r["id"] for r in rows if r["kind"] != "contribution"]
+    contexts = {e.id: e.context for e in db.scalars(select(Entry).where(Entry.user_id == user.id, Entry.id.in_(entry_ids)))}
+    for r in rows:
+        r["context"] = contexts.get(r["id"], {}) if r["kind"] != "contribution" else {}
+        if r["goal_id"]:
+            r["description"] = titles.get(r["goal_id"], "")
+    return rows

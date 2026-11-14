@@ -31,3 +31,6 @@ mobile/playwright-report/
 *.pdf
 *.log
 .ruff_cache/
+
+google-services.json
+GoogleService-Info.plist

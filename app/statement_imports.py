@@ -14,7 +14,8 @@ from pathlib import Path
 from uuid import UUID, uuid4
 
 import anyio
-from cryptography.fernet import Fernet, InvalidToken
+from cryptography.fernet import InvalidToken
+from app.crypto import cipher
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import Field
 from sqlalchemy import delete, select, update
@@ -26,6 +27,7 @@ from app.config import settings
 from app.db import SessionLocal, get_db
 from app.models import Entry, ImportLease, StatementImport
 from app.schemas import Strict
+from app.ingestion import make_entry
 from app.security import current_user, limit
 from app.statement_parser import MAX_BYTES, MAX_ROWS
 
@@ -38,12 +40,6 @@ MIMES = {
     "ofx": {"application/x-ofx", "application/ofx", "text/plain"},
     "docx": {"application/vnd.openxmlformats-officedocument.wordprocessingml.document"},
 }
-
-
-def cipher():
-    if not settings.statement_encryption_key:
-        raise HTTPException(503, "Importação indisponível: configure a chave de criptografia.")
-    return Fernet(settings.statement_encryption_key.encode())
 
 
 def fingerprint(data, uid):
@@ -84,17 +80,45 @@ def release_slot(token):
 
 
 def parse_isolated(data, fmt):
-    if os.name != "posix":
-        raise HTTPException(503, "O importador requer Linux/WSL para os limites de segurança.")
+    windows_dev = (
+        os.name == "nt"
+        and settings.environment == "development"
+        and settings.allow_windows_import_dev
+    )
+
+    if os.name != "posix" and not windows_dev:
+        raise HTTPException(
+            503,
+            "Importação requer Linux ou ambiente Windows de desenvolvimento autorizado."
+        )
     try:
+        worker_env = {
+            "LANG": "C.UTF-8",
+            "PATH": os.defpath,
+        }
+
+        if os.name == "nt":
+            for key, value in os.environ.items():
+                if key.upper() in {"SYSTEMROOT", "WINDIR", "TEMP", "TMP"}:
+                    worker_env[key] = value
+
         result = subprocess.run(
-            [sys.executable, "-B", str(Path(__file__).with_name("statement_worker.py")), fmt],
+            [
+                sys.executable,
+                "-B",
+                str(Path(__file__).with_name("statement_worker.py")),
+                fmt,
+            ],
             input=data,
             stdout=subprocess.PIPE,
             stderr=subprocess.DEVNULL,
             timeout=12,
-            cwd="/tmp",
-            env={"LANG": "C.UTF-8", "PATH": os.defpath},
+            cwd=(
+                os.environ.get("TEMP", os.environ.get("TMP"))
+                if os.name == "nt"
+                else "/tmp"
+            ),
+            env=worker_env,
             check=True,
         )
         if len(result.stdout) > 512 * 1024:
@@ -279,8 +303,9 @@ def confirm(item_id: UUID, payload: ConfirmImport, user=Depends(current_user), d
     for i in payload.selected:
         r = rows[i]
         db.add(
-            Entry(
+            make_entry(
                 user_id=user.id,
+                source="statement",
                 request_id=str(uuid4()),
                 on_date=date.fromisoformat(r["on_date"]),
                 amount_cents=r["amount_cents"],
@@ -289,6 +314,7 @@ def confirm(item_id: UUID, payload: ConfirmImport, user=Depends(current_user), d
                 description="",
                 essential=False,
                 payment_method="other",
+                context=r.get("context"),
             )
         )
     row.status, row.imported_count, row.payload = "confirmed", len(payload.selected), b""

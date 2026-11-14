@@ -116,6 +116,11 @@ export function EntryForm({
     [date, setDate] = useState(entry?.on_date || localDate()),
     [description, setDescription] = useState(entry?.description || ""),
     [essential, setEssential] = useState(entry?.essential || false),
+    [merchant, setMerchant] = useState(entry?.context?.merchant || ""),
+    [address, setAddress] = useState(entry?.context?.address || ""),
+    [clock, setClock] = useState(entry?.context?.occurred_at ? new Intl.DateTimeFormat("en-GB", {timeZone:"America/Sao_Paulo",hour:"2-digit",minute:"2-digit"}).format(new Date(entry.context.occurred_at)) : ""),
+    [niche, setNiche] = useState(entry?.context?.niche || ""),
+    [unplanned, setUnplanned] = useState(entry?.context?.unplanned || false),
     [payment, setPayment] = useState(entry?.payment_method || "pix"),
     [requestId] = useState(entry?.request_id || Crypto.randomUUID());
   const { busy, error, run } = useSubmit(onClose);
@@ -155,6 +160,12 @@ export function EntryForm({
         onChangeText={setDescription}
         maxLength={240}
       />
+      <Field label="Estabelecimento · opcional" value={merchant} onChangeText={setMerchant} maxLength={120} />
+      <Field label="Endereço do estabelecimento · opcional" value={address} onChangeText={setAddress} maxLength={200} />
+      <Field label="Horário em Brasília (HH:MM) · opcional" value={clock} onChangeText={setClock} maxLength={5} />
+      <Text style={styles.body}>Contexto do gasto · opcional</Text>
+      <Choices items={[{id:'',label:'Não informado'},{id:'fast_food',label:'Lanches / fast-food'},{id:'subscriptions',label:'Assinaturas'},{id:'impulse',label:'Compra por impulso'},{id:'beauty',label:'Estética'},{id:'tattoo',label:'Tatuagem'},{id:'travel',label:'Viagem'}]} value={niche} onChange={setNiche} />
+      <View style={styles.row}><Text style={styles.body}>Gasto não planejado por mim</Text><Switch value={unplanned} onValueChange={setUnplanned} accessibilityLabel="Gasto não planejado" /></View>
       <Text style={styles.body}>Forma de pagamento</Text>
       <Choices
         items={[
@@ -205,6 +216,8 @@ export function EntryForm({
                 description,
                 essential: kind === "expense" && essential,
                 payment_method: payment,
+                context: {merchant: merchant || null,address: address || null,niche: niche || null,unplanned,
+                  local_time: clock || null},
               },
             );
           })
@@ -288,7 +301,9 @@ export function GoalForm({
   const [title, setTitle] = useState(goal?.title || ""),
     [motivation, setMotivation] = useState(goal?.motivation || ""),
     [amount, setAmount] = useState(goal ? inputMoney(goal.target_cents) : ""),
-    [deadline, setDeadline] = useState(goal?.deadline || "");
+    [deadline, setDeadline] = useState(goal?.deadline || ""),
+    [planned, setPlanned] = useState(goal?.planned_monthly_cents ? inputMoney(goal.planned_monthly_cents) : ""),
+    [contributionDay, setContributionDay] = useState(String(goal?.contribution_day || 1));
   const { busy, error, run } = useSubmit(onClose);
   return (
     <Sheet
@@ -321,6 +336,8 @@ export function GoalForm({
         onChangeText={setDeadline}
         maxLength={10}
       />
+      <Field label="Aporte mensal planejado (R$) · opcional" value={planned} onChangeText={setPlanned} keyboardType="decimal-pad" />
+      <Field label="Dia mensal do aporte (1 a 28)" value={contributionDay} onChangeText={setContributionDay} keyboardType="number-pad" />
       <Text style={styles.muted}>
         Objetivo é o que você quer alcançar. A meta é o valor e o prazo. Aportes
         mostram o quanto você realmente reservou.
@@ -341,6 +358,8 @@ export function GoalForm({
               {
                 title: title.trim(),
                 motivation,
+                planned_monthly_cents: planned ? cents(planned) : 0,
+                contribution_day: Number(contributionDay),
                 target_cents: cents(amount),
                 deadline,
               },

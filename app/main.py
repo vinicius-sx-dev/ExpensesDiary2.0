@@ -137,6 +137,8 @@ app.include_router(statement_imports)
 
 from app.pluggy import router as pluggy
 app.include_router(pluggy)
+from app.advisor.routes import router as advisor
+app.include_router(advisor)
 
 
 # Outer validation rejects invalid hosts before database-backed request limits.

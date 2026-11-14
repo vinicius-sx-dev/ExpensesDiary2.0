@@ -1,18 +1,24 @@
 """Fresh process with no application imports, credentials, network or file output."""
 
+import os
 import json
 import sys
 
 
 def main():
     # Production requires Linux/POSIX hard limits; unsupported hosts fail closed.
-    import resource
+    if os.name == "posix":
+        import resource
 
-    resource.setrlimit(resource.RLIMIT_AS, (384 * 1024 * 1024,) * 2)
-    resource.setrlimit(resource.RLIMIT_CPU, (8, 8))
-    resource.setrlimit(resource.RLIMIT_FSIZE, (0, 0))
-    resource.setrlimit(resource.RLIMIT_CORE, (0, 0))
-    resource.setrlimit(resource.RLIMIT_NOFILE, (32, 32))
+        resource.setrlimit(
+            resource.RLIMIT_AS,
+            (384 * 1024 * 1024,) * 2
+        )
+
+        resource.setrlimit(resource.RLIMIT_CPU, (8, 8))
+        resource.setrlimit(resource.RLIMIT_FSIZE, (0, 0))
+        resource.setrlimit(resource.RLIMIT_CORE, (0, 0))
+        resource.setrlimit(resource.RLIMIT_NOFILE, (32, 32))
     from zoneinfo import ZoneInfo
 
     # Load parser code/timezone before denying filesystem reads.
