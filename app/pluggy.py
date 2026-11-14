@@ -10,6 +10,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 from sqlalchemy import select
 
 from app.balance import lock_wallet
+from app.ingestion import make_entry
 from app.config import settings
 from app.db import get_db
 from app.models import Entry, Contribution, Goal, PluggyReceipt
@@ -30,6 +31,7 @@ class Transaction(BaseModel):
     currencyCode: Literal["BRL"]
     type: Literal["CREDIT", "DEBIT"]
     status: Literal["POSTED", "PENDING"]
+    merchant: str | None = Field(default=None, max_length=120)
     category: str | None = Field(default=None, max_length=100)
 
     @model_validator(mode="after")
@@ -138,9 +140,9 @@ def sync(payload: SyncInput, user=Depends(current_user), db=Depends(get_db)):
             kind = "income" if tx.type == "CREDIT" else "expense"
             mapping = {"Salary": "salario", "Groceries": "mercado", "Restaurants": "restaurante"}
             category = mapping.get(tx.category, "outras_receitas" if kind == "income" else "outros")
-            db.add(Entry(user_id=user.id, request_id=rid, kind=kind, category=category,
+            db.add(make_entry(user_id=user.id, source="pluggy_mock", request_id=rid, kind=kind, category=category,
                          amount_cents=cents, on_date=day, description="", essential=False,
-                         payment_method="other"))
+                         payment_method="other", context={"occurred_at": tx.date, "merchant": tx.merchant, "niche": "fast_food" if tx.category == "Restaurants" else None}))
         db.add(PluggyReceipt(user_id=user.id, request_id=rid))
         result.imported += 1
     db.commit()

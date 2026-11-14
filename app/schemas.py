@@ -6,6 +6,7 @@ from zoneinfo import ZoneInfo
 from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator, model_validator
 
 from app.categories import EXPENSE_CATEGORIES, INCOME_CATEGORIES
+from app.ingestion import MovementContext, normalized_context
 
 
 def today():
@@ -57,6 +58,7 @@ class Profile(Strict):
 
 
 class EntryInput(Strict):
+    context: MovementContext = Field(default_factory=MovementContext)
     request_id: UUID
     kind: Literal["expense", "income"]
     category: str
@@ -68,6 +70,8 @@ class EntryInput(Strict):
 
     @model_validator(mode="after")
     def valid(self):
+        if isinstance(self.context, MovementContext):
+            normalized_context(self.context.model_dump(), self.on_date, "manual")
         allowed = EXPENSE_CATEGORIES if self.kind == "expense" else INCOME_CATEGORIES
         if self.category not in allowed:
             raise ValueError("Categoria incompatível")
@@ -77,6 +81,7 @@ class EntryInput(Strict):
 
 
 class EntryRead(EntryInput):
+    context: dict
     id: int
 
 
@@ -99,6 +104,8 @@ class BudgetRead(BudgetInput):
 
 
 class GoalInput(Strict):
+    planned_monthly_cents: int = Field(default=0, strict=True, ge=0, le=10_000_000_000)
+    contribution_day: int = Field(default=1, strict=True, ge=1, le=28)
     title: str = Field(min_length=2, max_length=100)
     motivation: str = Field(default="", max_length=240)
     target_cents: Money
@@ -113,6 +120,8 @@ class GoalInput(Strict):
 
 
 class GoalRead(Strict):
+    planned_monthly_cents: int
+    contribution_day: int
     id: int
     title: str
     motivation: str
@@ -144,6 +153,7 @@ class Insight(Strict):
 
 
 class MovementRead(Strict):
+    context: dict = Field(default_factory=dict)
     id: int
     request_id: str
     kind: Literal["expense", "income", "contribution"]

@@ -82,6 +82,13 @@ def movement(d, value, direction="", decimal_comma=True):
 
 
 ALIASES = {
+    "estabelecimento": "merchant",
+    "merchant": "merchant",
+    "endereco": "address",
+    "address": "address",
+    "horario": "time",
+    "hora": "time",
+    "time": "time",
     "data": "date",
     "date": "date",
     "data lancamento": "date",
@@ -122,7 +129,7 @@ def table(rows):
     headers = [ALIASES.get(norm(c)) for c in rows[0]]
     if None in headers or headers.count("date") != 1:
         reject()
-    for k in ("amount", "direction", "credit", "debit", "description", "balance"):
+    for k in ("amount", "direction", "credit", "debit", "description", "balance", "merchant", "address", "time"):
         if headers.count(k) > 1:
             reject()
     if not (("amount" in headers) ^ ("credit" in headers and "debit" in headers)):
@@ -155,7 +162,30 @@ def table(rows):
             if raw.startswith("-"):
                 reject()
             result.append(movement(v["date"], raw, direction, "," in raw or "." not in raw))
+        context = extract_context(v, result[-1]["on_date"])
+        if context:
+            result[-1]["context"] = context
     return result
+
+
+def extract_context(values, on_date):
+    # Only explicit columns. Free-form bank descriptions may contain counterparty PII.
+    context = {}
+    for key, maximum in (("merchant", 120), ("address", 200)):
+        value = values.get(key, "").strip()
+        if value:
+            if len(value) > maximum or re.search(r"[<>\x00-\x1f]|https?://|\b\d{3}\.?\d{3}\.?\d{3}-?\d{2}\b|\b\d{2}\.?\d{3}\.?\d{3}/?\d{4}-?\d{2}\b", value, re.I):
+                reject()
+            context[key] = value
+    clock = values.get("time", "").strip()
+    if clock:
+        if not re.fullmatch(r"(?:[01]\d|2[0-3]):[0-5]\d", clock):
+            reject()
+        timestamp = datetime.fromisoformat(on_date + "T" + clock).replace(tzinfo=ZoneInfo("America/Sao_Paulo"))
+        if timestamp > datetime.now(timestamp.tzinfo):
+            reject()
+        context["occurred_at"] = timestamp.isoformat()
+    return context
 
 
 def csv_rows(data):

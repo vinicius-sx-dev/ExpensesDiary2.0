@@ -29,6 +29,7 @@ jobs:
           python-version: '3.12'
       - run: python scripts/check_publication.py
       - run: pip install -r requirements.lock
+      - run: python -c "from cryptography.fernet import Fernet; print('STATEMENT_ENCRYPTION_KEY=' + Fernet.generate_key().decode())" >> "$GITHUB_ENV"
       - run: alembic upgrade head
       - run: python -m pytest -q
         env:

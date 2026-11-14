@@ -57,6 +57,10 @@ for (const width of [360, 768, 1280]) {
           access_token: "ui-fixture-only",
           refresh_token: "ui-fixture-only",
         },
+        "/advisor/preferences": { municipality: "4106902", notifications_enabled: false, selected_goal_id: 1, timezone: "America/Sao_Paulo", max_per_week: 2, quiet_start: 20, quiet_end: 9 },
+        "/advisor/regions": { "4106902": "Curitiba", "4114501": "Manoel Ribas" },
+        "/advisor/patterns": { goal: { actual_monthly_cents: 50000, planned_monthly_cents: 80000, gap_cents: 30000, assumptions: "Média dos aportes registrados nos três meses completos." }, patterns: [{ strategy: "fast_food", occurrences: 12, average_cents: 4000, weekday: 4, hour: 18, action: "Substituir uma refeição fora por uma receita caseira" }], note: "Histórico informado." },
+        "/advisor/simulate": { result: { status: "prices_unavailable", message: "Preços locais indisponíveis: não há cotações verificáveis suficientes.", alternative: { name: "Sanduíche frio de queijo e tomate" } } },
         "/imports": [],
         "/imports/preview": { id: "preview-fixture", expires_at: 9999999999,
           income_cents: 10000, expense_cents: 2000, rows: [
@@ -191,6 +195,15 @@ for (const width of [360, 768, 1280]) {
     await page.getByRole("button", { name: "Abrir 2026-11-09" }).click();
     await openDownload;
     await expect(page.getByText("Exibindo retrato salvo", {exact: false})).toBeVisible();
+    await page.getByRole("tab", {name: /Dicas/}).click();
+    await expect(page.getByText("Alternativas para sua meta", {exact:true})).toBeVisible();
+    await page.getByRole("button", {name:"Analisar meu histórico"}).click();
+    await page.getByRole("button", {name:"Alimentação fora",exact:true}).click();
+    await page.getByRole("button", {name:"Calcular alternativa"}).click();
+    await expect(page.getByText("Preços locais indisponíveis:", {exact:false})).toBeVisible();
+    await expect(page.getByText("Conclusão projetada:", {exact:false})).not.toBeVisible();
+    await page.screenshot({path:testInfo.outputPath("advisor.png"),fullPage:true});
+    expect(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth)).toBe(false);
     expect(errors).toEqual([]);
   });
 }

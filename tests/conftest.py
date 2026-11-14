@@ -9,6 +9,8 @@ os.environ["DATABASE_URL"] = os.environ.get(
 )
 os.environ.setdefault("JWT_SECRET", "testing-only-secret-with-more-than-32-characters")
 os.environ["ENVIRONMENT"] = "test"
+from cryptography.fernet import Fernet
+os.environ["STATEMENT_ENCRYPTION_KEY"] = Fernet.generate_key().decode()
 import pytest
 from fastapi.testclient import TestClient
 

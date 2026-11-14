@@ -11,6 +11,10 @@ class Settings(BaseSettings):
     environment: Literal["development", "test", "production"] = "development"
     registration_enabled: bool | None = None
     ai_global_hourly_limit: int = Field(default=100, ge=1, le=10000)
+    advisor_price_feed_url: str = ""
+    advisor_price_feed_token: str = ""
+    expo_access_token: str = ""
+    advisor_push_enabled: bool = False
     pluggy_mock_enabled: bool = False
     pluggy_client_id: str = ""
     pluggy_client_secret: str = ""
@@ -33,6 +37,10 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def production(self):
+        if self.advisor_price_feed_url:
+            u = urlsplit(self.advisor_price_feed_url)
+            if u.scheme != "https" or not u.hostname or u.username or u.password or u.fragment or u.query:
+                raise ValueError("Price feed must be a fixed HTTPS endpoint")
         if self.statement_encryption_key:
             from cryptography.fernet import Fernet
             try:
