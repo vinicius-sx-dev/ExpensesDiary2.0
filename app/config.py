@@ -34,6 +34,7 @@ class Settings(BaseSettings):
     smtp_from: str = ""
     groq_api_key: str = ""
     groq_model: str = "openai/gpt-oss-120b"
+    allow_windows_import_dev: bool = False
 
     @model_validator(mode="after")
     def production(self):
@@ -71,6 +72,5 @@ class Settings(BaseSettings):
             ):
                 raise ValueError("Production requires explicit hosts and HTTPS origins")
         return self
-
 
 settings = Settings()

@@ -80,17 +80,45 @@ def release_slot(token):
 
 
 def parse_isolated(data, fmt):
-    if os.name != "posix":
-        raise HTTPException(503, "O importador requer Linux/WSL para os limites de segurança.")
+    windows_dev = (
+        os.name == "nt"
+        and settings.environment == "development"
+        and settings.allow_windows_import_dev
+    )
+
+    if os.name != "posix" and not windows_dev:
+        raise HTTPException(
+            503,
+            "Importação requer Linux ou ambiente Windows de desenvolvimento autorizado."
+        )
     try:
+        worker_env = {
+            "LANG": "C.UTF-8",
+            "PATH": os.defpath,
+        }
+
+        if os.name == "nt":
+            for key, value in os.environ.items():
+                if key.upper() in {"SYSTEMROOT", "WINDIR", "TEMP", "TMP"}:
+                    worker_env[key] = value
+
         result = subprocess.run(
-            [sys.executable, "-B", str(Path(__file__).with_name("statement_worker.py")), fmt],
+            [
+                sys.executable,
+                "-B",
+                str(Path(__file__).with_name("statement_worker.py")),
+                fmt,
+            ],
             input=data,
             stdout=subprocess.PIPE,
             stderr=subprocess.DEVNULL,
             timeout=12,
-            cwd="/tmp",
-            env={"LANG": "C.UTF-8", "PATH": os.defpath},
+            cwd=(
+                os.environ.get("TEMP", os.environ.get("TMP"))
+                if os.name == "nt"
+                else "/tmp"
+            ),
+            env=worker_env,
             check=True,
         )
         if len(result.stdout) > 512 * 1024:
