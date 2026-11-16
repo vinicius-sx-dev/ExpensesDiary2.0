@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { Text, View } from "react-native";
 import {
   Button,
@@ -11,6 +11,7 @@ import {
 import { useFinance } from "../stores/finance";
 import { api } from "../lib/api";
 import { Report, Insight, isoDate, money } from "../lib/types";
+import { FinanceCharts } from "../components/FinanceCharts";
 import { exportReportPdf } from "../lib/reportPdf";
 
 export function Reports({ onOpenSaved }: { onOpenSaved: () => void }) {
@@ -24,6 +25,7 @@ export function Reports({ onOpenSaved }: { onOpenSaved: () => void }) {
     [error, setError] = useState<string | null>(null),
     [message, setMessage] = useState("");
   const r = report || current;
+  useEffect(() => { if (!date && current) setDate(current.week_start); }, [current, date]);
   async function run(fn: () => Promise<void>) {
     setBusy(true);
     setError(null);
@@ -67,6 +69,16 @@ export function Reports({ onOpenSaved }: { onOpenSaved: () => void }) {
       ) : null}
       {r ? (
         <>
+          <Button
+            label="Exportar PDF do relatório exibido"
+            secondary
+            busy={busy}
+            onPress={() => run(async () => {
+              await exportReportPdf(r, categories, insight);
+              setMessage("PDF exportado ou encaminhado ao compartilhamento.");
+            })}
+          />
+          <FinanceCharts report={r} categories={categories} />
           <Card color="#E8EBCF">
             <Text style={styles.h2}>
               {r.week_start.split("-").reverse().join("/")} —{" "}
@@ -185,15 +197,6 @@ export function Reports({ onOpenSaved }: { onOpenSaved: () => void }) {
                 }
               })
             }
-          />
-          <Button
-            label="Exportar PDF do relatório exibido"
-            secondary
-            busy={busy}
-            onPress={() => run(async () => {
-              await exportReportPdf(r, categories, insight);
-              setMessage("PDF exportado ou encaminhado ao compartilhamento.");
-            })}
           />
           <Card>
             <Text style={styles.h2}>Uma segunda perspectiva</Text>

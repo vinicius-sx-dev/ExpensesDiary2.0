@@ -106,6 +106,7 @@ def edit_entry(item_id: int, payload: EntryInput, user=Depends(current_user), db
         raise HTTPException(409, "Identificador imutável")
     data = values(payload)
     data["context"] = normalized_context(data["context"], payload.on_date, row.context.get("source", "manual"))
+    data["context"]["classification_reviewed"] = True
     for k, v in data.items():
         setattr(row, k, v)
     save(db)

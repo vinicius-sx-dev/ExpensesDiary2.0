@@ -165,9 +165,12 @@ for (const width of [360, 768, 1280]) {
         await expect(page.getByRole("button", { name: "Confirmar 2 movimentações" })).toBeVisible();
         await page.getByRole("checkbox").nth(1).click();
         await page.screenshot({ path: testInfo.outputPath("statement-preview.png"), fullPage: true });
+        await page.getByRole("button", {name: "Revisar categoria", exact: true}).first().click();
+        await page.getByRole("button", {name: "Salário", exact: true}).click();
+        await page.getByRole("button", {name: "Confirmar categoria deste item", exact: true}).click();
         const confirmRequest = page.waitForRequest(r => r.url().endsWith("/imports/preview-fixture/confirm"));
         await page.getByRole("button", { name: "Confirmar 1 movimentações" }).click();
-        expect((await confirmRequest).postDataJSON()).toEqual({ selected: [0] });
+        expect((await confirmRequest).postDataJSON()).toEqual({ selected: [0], classifications: [{index: 0, category: "salario", essential: false, niche: null, unplanned: false}] });
         await expect(page.getByText(/1 movimentações importadas\. Entradas:/)).toBeVisible();
       }
       await page.screenshot({
@@ -184,6 +187,9 @@ for (const width of [360, 768, 1280]) {
     }
     await page.getByRole("button", { name: "Enviar totais e pedir comentários à IA" }).click();
     await expect(page.getByText("Resumo gerado pela IA.")).toBeVisible();
+    await expect(page.getByText("Receitas e despesas", {exact: true})).toBeVisible();
+    await expect(page.getByText("Distribuição dos gastos", {exact: true})).toBeVisible();
+    await expect(page.getByText("Proporção das movimentações", {exact: true})).toBeVisible();
     const downloadPromise = page.waitForEvent("download");
     await page.getByRole("button", { name: "Exportar PDF do relatório exibido" }).click();
     const download = await downloadPromise;

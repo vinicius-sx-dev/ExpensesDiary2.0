@@ -12,6 +12,7 @@ from collections import Counter
 from datetime import date
 from pathlib import Path
 from uuid import UUID, uuid4
+from typing import Annotated, Literal
 
 import anyio
 from cryptography.fernet import InvalidToken
@@ -24,6 +25,8 @@ from starlette.datastructures import UploadFile
 from starlette.formparsers import MultiPartException, MultiPartParser
 
 from app.balance import lock_wallet
+from app.categories import EXPENSE_CATEGORIES, INCOME_CATEGORIES
+from app.classification import learned_categories, suggest
 from app.config import settings
 from app.crypto import cipher
 from app.db import SessionLocal, get_db
@@ -179,13 +182,14 @@ def preview(row, db, uid):
             )
         ).all()
     )
+    learned = learned_categories(db, uid)
     output = []
     for index, r in enumerate(rows):
         key = (date.fromisoformat(r["on_date"]), r["kind"], r["amount_cents"])
         duplicate = existing[key] > 0
         if duplicate:
             existing[key] -= 1
-        output.append(dict(r, index=index, possible_duplicate=duplicate))
+        output.append(dict(r, **({} if "category" in r else suggest(r, learned)), index=index, possible_duplicate=duplicate))
     return {
         "id": row.id,
         "expires_at": row.expires_at,
@@ -226,6 +230,8 @@ def store_preview(data, fmt, uid, institution=None):
             raise HTTPException(
                 409, "Confirme ou descarte as prévias pendentes antes de enviar outro extrato."
             )
+        learned = learned_categories(db, uid)
+        rows = [dict(r, **suggest(r, learned)) for r in rows]
         identifier = str(uuid4())
         payload = cipher().encrypt(
             json.dumps({"id": identifier, "user_id": uid, "rows": rows}).encode()
@@ -345,8 +351,18 @@ def get_preview(item_id: UUID, user=Depends(current_user), db=Depends(get_db)):
     return preview(row, db, user.id)
 
 
+class Classification(Strict):
+    index: int = Field(strict=True, ge=0, lt=MAX_ROWS)
+    category: str = Field(max_length=60)
+    essential: bool = Field(default=False, strict=True)
+    niche: Literal["fast_food", "subscriptions", "impulse", "beauty", "tattoo", "travel"] | None = None
+    unplanned: bool = Field(default=False, strict=True)
+
+
 class ConfirmImport(Strict):
-    selected: list[int] = Field(min_length=1, max_length=MAX_ROWS)
+    selected: list[Annotated[int, Field(strict=True)]] = Field(min_length=1, max_length=MAX_ROWS)
+    classifications: list[Classification] = Field(default_factory=list, max_length=MAX_ROWS)
+    allow_duplicates: bool = Field(default=False, strict=True)
 
 
 @router.post("/{item_id}/confirm")
@@ -366,23 +382,35 @@ def confirm(item_id: UUID, payload: ConfirmImport, user=Depends(current_user), d
         i < 0 or i >= len(rows) for i in payload.selected
     ):
         raise HTTPException(422, "Seleção inválida.")
+    choices = {c.index: c for c in payload.classifications}
+    if len(choices) != len(payload.classifications) or not set(choices).issubset(payload.selected):
+        raise HTTPException(422, "Classificações inválidas.")
+    checked = preview(row, db, user.id)["rows"]
+    if not payload.allow_duplicates and any(
+        r["possible_duplicate"] and r["index"] in payload.selected for r in checked
+    ):
+        raise HTTPException(409, "Há possíveis duplicatas. Atualize a prévia e confirme a revisão.")
     for i in payload.selected:
-        r = rows[i]
-        db.add(
-            make_entry(
-                user_id=user.id,
-                source="statement",
-                request_id=str(uuid4()),
-                on_date=date.fromisoformat(r["on_date"]),
-                amount_cents=r["amount_cents"],
-                kind=r["kind"],
-                category="outros" if r["kind"] == "expense" else "outras_receitas",
-                description="",
-                essential=False,
-                payment_method="other",
-                context=r.get("context"),
-            )
+        r = checked[i]
+        choice = choices.get(i)
+        category = choice.category if choice else r["category"]
+        allowed = EXPENSE_CATEGORIES if r["kind"] == "expense" else INCOME_CATEGORIES
+        if category not in allowed or (r["kind"] == "income" and choice and (
+            choice.essential or choice.niche or choice.unplanned
+        )):
+            raise HTTPException(422, "Categoria ou contexto incompatível com a movimentação.")
+        context = dict(r.get("context") or {})
+        if choice:
+            context.update(niche=choice.niche, unplanned=choice.unplanned)
+        entry = make_entry(
+            user_id=user.id, source="statement", request_id=str(uuid4()),
+            on_date=date.fromisoformat(r["on_date"]), amount_cents=r["amount_cents"],
+            kind=r["kind"], category=category, description="",
+            essential=choice.essential if choice else False, payment_method="other",
+            context=context,
         )
+        entry.context = {**entry.context, "classification_reviewed": choice is not None}
+        db.add(entry)
     row.status, row.imported_count, row.payload = "confirmed", len(payload.selected), b""
     db.commit()
     return {"imported_count": row.imported_count, "already_confirmed": False}

@@ -55,6 +55,28 @@ def build_report(db, uid, start):
             .group_by(Entry.category)
         )
     ]
+    income_breakdown = [
+        {"category": category, "amount_cents": int(amount)}
+        for category, amount in db.execute(
+            select(Entry.category, func.sum(Entry.amount_cents))
+            .where(Entry.user_id == uid, Entry.kind == "income", Entry.on_date.between(start, end))
+            .group_by(Entry.category)
+        )
+    ]
+    daily_values = {
+        (day, kind): int(amount)
+        for day, kind, amount in db.execute(
+            select(Entry.on_date, Entry.kind, func.sum(Entry.amount_cents))
+            .where(Entry.user_id == uid, Entry.on_date.between(start, end))
+            .group_by(Entry.on_date, Entry.kind)
+        )
+    }
+    daily = [
+        {"date": str(start + timedelta(days=i)),
+         "income_cents": daily_values.get((start + timedelta(days=i), "income"), 0),
+         "expense_cents": daily_values.get((start + timedelta(days=i), "expense"), 0)}
+        for i in range((end - start).days + 1)
+    ]
     # A week may cross months: compare each month's cumulative spending with its own full budget.
     months = sorted({start.replace(day=1), end.replace(day=1)})
     budget_rows = []
@@ -135,6 +157,8 @@ def build_report(db, uid, start):
         "required_weekly_cents": planned,
         "goal_gap_cents": max(0, planned - max(0, income - spent - reserved)),
         "categories": breakdown,
+        "income_categories": income_breakdown,
+        "daily": daily,
         "budgets": budget_rows,
         "goals": goals,
         "note": "Fluxo apenas dos lançamentos informados. Ausência de receita não significa renda zero. Aportes reduzem o saldo disponível e aumentam a reserva dos objetivos, sem duplicar despesas de consumo. O saldo considera todo o histórico informado até o fim do período, não confirma saldo bancário. Necessidade semanal é uma estimativa; receita mensal pode cair em outra semana.",
