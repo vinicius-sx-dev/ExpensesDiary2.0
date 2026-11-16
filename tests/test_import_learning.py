@@ -144,3 +144,39 @@ def test_reports_daily_and_category_totals_are_user_scoped(client):
     assert report["income_categories"] == [{"category": "salario", "amount_cents": 10000}]
     assert report["daily"][-1]["date"] == str(today())
     assert 1 <= len(report["daily"]) <= 7
+
+
+def test_conflicting_explicit_labels_abstain_and_deletion_recalculates(client):
+    h, _ = login(client)
+    for category in ("mercado", "restaurante"):
+        result = client.post("/entries", headers=h, json=entry(
+            category=category, context={"merchant": "Loja Exemplo"}
+        ))
+        assert result.status_code == 201, result.text
+    assert upload(client, h)["rows"][0]["category"] == "outros"
+    assert client.delete(f"/entries/{result.json()['id']}", headers=h).status_code == 204
+    assert upload(client, h, "2025-01-02")["rows"][0]["category"] == "mercado"
+
+
+def test_confirmation_can_review_maximum_row_count_atomically(client, monkeypatch):
+    from app import statement_imports
+    h, _ = login(client)
+    rows = [{"on_date": "2025-01-01", "amount_cents": i + 1, "kind": "expense"} for i in range(2000)]
+    monkeypatch.setattr(statement_imports, "parse_isolated", lambda *args: rows)
+    p = upload(client, h)
+    response = client.post(f"/imports/{p['id']}/confirm", headers=h, json={
+        "selected": list(range(2000)),
+        "classifications": [{"index": i, "category": "mercado"} for i in range(2000)],
+    })
+    assert response.status_code == 200, response.text
+    assert response.json()["imported_count"] == 2000
+
+
+def test_picpay_internal_transfers_are_flagged_for_explicit_review():
+    from app.statement_parser import parse
+    csv = ('data,hora,tipo,"origem / destino",valor,"forma de pagamento"\n'
+           '2025-01-01,10:00,"Dinheiro guardado","Reserva","−R$ 10,00","Com saldo"\n'
+           '2025-01-02,10:00,"Dinheiro resgatado","Reserva","+R$ 10,00","Com saldo"\n')
+    rows = parse(csv.encode(), "csv", "PICPAY")
+    assert all(r["review_reason"] == "internal_transfer" for r in rows)
+    assert [r["kind"] for r in rows] == ["expense", "income"]

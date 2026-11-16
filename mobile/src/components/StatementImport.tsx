@@ -8,7 +8,7 @@ import { useFinance } from "../stores/finance";
 import { CategoryPicker } from "./FinanceForms";
 import { Button, Card, Choices, colors, styles } from "./ui";
 
-type Row = { index: number; on_date: string; amount_cents: number; kind: "income" | "expense"; possible_duplicate: boolean; category?: string; classification_source?: string; context?: { merchant?: string } };
+type Row = { index: number; on_date: string; amount_cents: number; kind: "income" | "expense"; possible_duplicate: boolean; review_reason?: string; category?: string; classification_source?: string; context?: { merchant?: string } };
 type Classification = { index: number; category: string; essential: boolean; niche: string | null; unplanned: boolean };
 type Preview = { id: string; expires_at: number; rows: Row[]; income_cents: number; expense_cents: number };
 
@@ -42,7 +42,7 @@ export function StatementImport() {
   useEffect(() => { refresh().catch(() => {}); }, []);
   const show = (p: Preview) => {
     setPreview(p); setPage(0); setClassifications({}); setEditing(null); setAllowDuplicates(false);
-    setSelected(new Set(p.rows.filter(r => !r.possible_duplicate).map(r => r.index)));
+    setSelected(new Set(p.rows.filter(r => !r.possible_duplicate && !r.review_reason).map(r => r.index)));
   };
   const run = async (action: () => Promise<void>) => {
     setBusy(true); setMessage("");
@@ -114,10 +114,11 @@ export function StatementImport() {
       <Text style={styles.muted}>Revise as categorias sugeridas. Use “Revisar categoria” para confirmar categoria, contexto e essencialidade. Somente escolhas revisadas ensinam o classificador e alimentam as dicas; itens sem revisão continuam nos totais.</Text>
       <Button label="Atualizar prévia" secondary busy={busy} onPress={() => run(async () => show(await api<Preview>(`/imports/${preview.id}`)))} />
       <Button label="Desmarcar todas" secondary disabled={busy} onPress={() => setSelected(new Set())} />
-      <Button label="Selecionar sem possíveis duplicatas" secondary disabled={busy} onPress={() => setSelected(new Set(preview.rows.filter(r => !r.possible_duplicate).map(r => r.index)))} />
+      <Button label="Selecionar sem duplicatas ou movimentações internas" secondary disabled={busy} onPress={() => setSelected(new Set(preview.rows.filter(r => !r.possible_duplicate && !r.review_reason).map(r => r.index)))} />
       {preview.rows.slice(page * 25, page * 25 + 25).map(r => <View key={r.index} style={{ gap: 8 }}><Pressable disabled={busy} accessibilityRole="checkbox" aria-checked={selected.has(r.index)} aria-disabled={busy} accessibilityState={{ checked: selected.has(r.index), disabled: busy }} onPress={() => setSelected(old => { const next = new Set(old); next.has(r.index) ? next.delete(r.index) : next.add(r.index); return next; })} style={{ padding: 12, borderWidth: 1, borderRadius: 8, borderColor: selected.has(r.index) ? colors.green : colors.line }}>
         <Text style={styles.body}>{selected.has(r.index) ? "✓ " : "○ "}{r.on_date.split("-").reverse().join("/")} · {r.kind === "income" ? "Entrada" : "Saída"} · {money(r.amount_cents)}</Text>
         {!!r.context?.merchant && <Text style={styles.muted}>{r.context.merchant}</Text>}
+        {r.review_reason === "internal_transfer" && <Text style={{color: colors.danger}}>Dinheiro guardado/resgatado: movimentação interna, não consumo ou renda nova. Deixe desmarcado para não distorcer os totais. Se selecionar, será registrado como entrada/saída comum.</Text>}
         {r.possible_duplicate && <Text style={{ color: colors.danger }}>Possível duplicata: confira antes de selecionar.</Text>}
       </Pressable>
         <Text style={styles.body}>Categoria: {categories.find(c => c.id === choice(r).category)?.label || choice(r).category}

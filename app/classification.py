@@ -23,8 +23,13 @@ def learned_categories(db, uid):
         if not (context.get("classification_reviewed") or context.get("source") == "manual"):
             continue
         key = (entry.kind, merchant_key(context.get("merchant")))
-        if key[1] and key not in result:
+        if not key[1]:
+            continue
+        if key not in result:
             result[key] = entry.category
+        elif result[key] != entry.category:
+            # Conflicting explicit labels are not evidence for an arbitrary latest-ID winner.
+            result[key] = "outros" if entry.kind == "expense" else "outras_receitas"
     return result
 
 

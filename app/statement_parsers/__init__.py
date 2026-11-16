@@ -198,6 +198,8 @@ class PicPayStrategy(BankStrategy):
         if kind in {"compra realizada", "compra estornada"}:
             values["merchant"] = safe_merchant(merchant)
         row["context"] = core.extract_context(values, row["on_date"])
+        if kind in {"dinheiro guardado", "dinheiro resgatado"}:
+            row["review_reason"] = "internal_transfer"
         return row
 
     def csv(self, data):
