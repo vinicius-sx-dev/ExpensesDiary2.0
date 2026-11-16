@@ -30,6 +30,14 @@ export async function exportReportPdf(report: Report, categories: Category[], in
       ),
     },
     {
+      title: "Receitas por categoria",
+      lines: (report.income_categories || []).map(item => `${categoryName(item.category)}: ${pdfMoney(item.amount_cents)}`),
+    },
+    {
+      title: "Evolução diária",
+      lines: (report.daily || []).map(day => `${dateLabel(day.date)} · Receitas: ${pdfMoney(day.income_cents)} · Despesas: ${pdfMoney(day.expense_cents)}`),
+    },
+    {
       title: "Orçamentos",
       lines: report.budgets.map((item) =>
         `${categoryName(item.category)} · ${item.month.slice(0, 7)}: ${pdfMoney(item.spent_cents)} de ${pdfMoney(item.limit_cents)}`,
@@ -69,6 +77,17 @@ export async function exportReportPdf(report: Report, categories: Category[], in
     }
     write("ExpensesDiary | Relatório semanal", 18);
     write(period + " · " + status, 11);
+    const maximum = Math.max(report.income_cents, report.expense_cents, 1);
+    for (const [label, amount, color] of [
+      ["Receitas", report.income_cents, "#226448"],
+      ["Despesas", report.expense_cents, "#A32942"],
+    ] as const) {
+      write(label + ": " + pdfMoney(amount), 11);
+      pdf.setFillColor(color);
+      pdf.rect(20, y, 170 * amount / maximum, 5, "F");
+      y += 10;
+    }
+    write(report.income_cents ? `Despesas / receitas: ${(report.expense_cents / report.income_cents * 100).toFixed(1)}%` : "Despesas / receitas: indisponível (sem receitas registradas).", 11);
     for (const section of sections) {
       y += 4;
       write(section.title, 14);
@@ -88,10 +107,14 @@ export async function exportReportPdf(report: Report, categories: Category[], in
     h1{font-size:26px}h2{font-size:18px;break-after:avoid}
     p{overflow-wrap:anywhere;line-height:1.5}</style></head>
     <body><h1>ExpensesDiary | Relatório semanal</h1><p>${period} · ${status}</p>
+    <h2>Receitas e despesas</h2>
+    ${([["Receitas", report.income_cents, "#226448"], ["Despesas", report.expense_cents, "#A32942"]] as const).map(([label, amount, color]) =>
+      `<p>${label}: ${pdfMoney(amount)}</p><div style="height:14px;background:${color};width:${100 * amount / Math.max(1, report.income_cents, report.expense_cents)}%"></div>`).join("")}
     ${sections.map(({ title, lines }) =>
       `<h2>${title}</h2>${(lines.length ? lines : ["Sem registros."]).map((line) => `<p>${escapeHtml(line)}</p>`).join("")}`,
     ).join("")}</body></html>`;
   const { uri } = await print.printToFileAsync({ html });
+  try {
   // Android: o usuário escolhe a pasta; o arquivo deixa de depender do cache.
   if (Platform.OS === "android") {
     const permission = await fs.StorageAccessFramework.requestDirectoryPermissionsAsync();
@@ -112,4 +135,7 @@ export async function exportReportPdf(report: Report, categories: Category[], in
     UTI: "com.adobe.pdf",
     dialogTitle: "Salvar relatório semanal",
   });
+  } finally {
+    await fs.deleteAsync(uri, { idempotent: true }).catch(() => {});
+  }
 }

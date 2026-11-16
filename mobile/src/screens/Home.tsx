@@ -8,6 +8,7 @@ import {
   styles,
   colors,
 } from "../components/ui";
+import { FinanceCharts } from "../components/FinanceCharts";
 import { Garden } from "../components/Garden";
 import { useFinance } from "../stores/finance";
 import { money } from "../lib/types";
@@ -90,6 +91,7 @@ export function Home({
           </Card>
         </View>
       </View>
+      {report && <FinanceCharts report={report} categories={categories} />}
       <Text style={styles.h2}>Como estão seus limites?</Text>
       {report?.budgets.length ? (
         report.budgets.slice(0, 3).map((b) => (

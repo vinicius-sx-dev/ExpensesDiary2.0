@@ -70,6 +70,7 @@ def patterns(entries, as_of):
             for e in entries
             if e.kind == "expense"
             and not e.essential
+            and e.context.get("classification_reviewed") is not False
             and start <= e.on_date <= as_of
             and strategy.matches(e)
         ]

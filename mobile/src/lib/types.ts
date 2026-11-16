@@ -54,6 +54,8 @@ export type Report = {
   required_weekly_cents: number;
   goal_gap_cents: number;
   note: string;
+  income_categories?: { category: string; amount_cents: number }[];
+  daily?: { date: string; income_cents: number; expense_cents: number }[];
   categories: {
     category: string;
     amount_cents: number;

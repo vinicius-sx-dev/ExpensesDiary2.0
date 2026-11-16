@@ -1,4 +1,5 @@
 import logging
+import re
 import traceback
 
 import anyio
@@ -39,6 +40,10 @@ class BodyLimit:
         # Upload route authenticates and acquires a shared lease BEFORE reading the body.
         if scope.get("path") == "/imports/preview" and scope.get("method") == "POST":
             return await self.app(scope, receive, send)
+        maximum = 512 * 1024 if (
+            scope.get("method") == "POST"
+            and re.fullmatch(r"/imports/[0-9a-fA-F-]{36}/confirm", scope.get("path", ""))
+        ) else 16384
         body = bytearray()
         try:
             # A total deadline prevents an endless trickle of sub-limit/empty chunks.
@@ -48,7 +53,7 @@ class BodyLimit:
                     if msg["type"] == "http.disconnect":
                         return
                     chunk = msg.get("body", b"")
-                    if len(body) + len(chunk) > 16384:
+                    if len(body) + len(chunk) > maximum:
                         return await JSONResponse(
                             {"detail": "Requisição muito grande"}, status_code=413
                         )(scope, receive, send)
